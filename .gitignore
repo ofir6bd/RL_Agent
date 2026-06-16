@@ -1,0 +1,38 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Large data files — never commit these
+data/raw/
+data/processed/
+*.npy
+*.nii
+*.nii.gz
+*.dcm
+
+# Model checkpoints
+runs/
+*.zip
+
+# Plots
+*.png
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.env
+
+*Archive*
+*data*
+*.lec_txt*
+*Lectures*

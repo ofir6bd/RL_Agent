@@ -1,0 +1,100 @@
+# --- data ---
+raw_dir:        data/original
+processed_dir:  data/processed
+train_split:    train         # subfolder used by train.py
+eval_split:     validation    # subfolder used by evaluate.py
+grid:           64           # resampled cube side
+n_fractions:    35
+
+# --- beams ---
+n_beams:        9
+beamlet_h:      16
+beamlet_w:      16
+
+# --- prescriptions (Gy, full course) ---
+prescription:
+  PTV70: 70.0
+  PTV63: 63.0
+  PTV56: 56.0
+
+# --- OAR tolerances (Gy, mean dose unless stated) ---
+oar_tolerance:
+  Brainstem:    54.0
+  SpinalCord:   45.0
+  Mandible:     70.0
+  LeftParotid:  26.0
+  RightParotid: 26.0
+
+# Per-OAR multiplier inside the OAR penalty (1.0 = neutral).
+oar_weights:
+  Brainstem:    1.0
+  SpinalCord:   1.0
+  Mandible:     1.0
+  LeftParotid:  1.0
+  RightParotid: 1.0
+
+# Serial OARs (single hot voxel is catastrophic) get an extra Dmax term.
+oar_serial:
+  Brainstem:    true
+  SpinalCord:   true
+  Mandible:     false
+  LeftParotid:  false
+  RightParotid: false
+
+# --- reward weights ---
+lambda_oar:           1.0
+# Sub-mix inside the OAR penalty: voxel is the main term, mean is a small
+# stabiliser, dmax fires only for serial OARs above.
+oar_voxel_subweight:  1.0
+oar_mean_subweight:   0.2
+oar_dmax_subweight:   1.0
+# Per-fraction PTV reward weight.  Each fraction is its own PPO episode;
+# the agent is rewarded for delivering its fair share of the remaining PTV
+# gap (target_voxel = max(prescription - cumulative_dose_before, 0)
+#                       / fractions_remaining).
+lambda_ptv:           1.5
+
+# --- PPO ---
+gamma:           0.995
+gae_lambda:      0.95
+clip_eps:        0.2
+ent_coef:        0.01
+vf_coef:         0.5
+lr:              3.0e-4
+ppo_epochs:      4
+minibatch:       64
+
+# --- training ---
+total_episodes:  2000
+eval_every:      50
+seed:            42
+device:          cuda           # falls back to cpu automatically
+ckpt_dir:        runs
+
+# --- warm-start (supervised actor pretraining) ---
+# Pretrain the actor head to predict the cached per-patient NNLS
+# beamlet plan (a* = argmin_{a>=0} ||DIM @ a - dose_gt/n_fractions||^2)
+# before PPO begins. Run scripts/compute_warmstart_actions.py first.
+warmstart_enabled:   true
+warmstart_epochs:    10
+warmstart_minibatch: 4
+warmstart_lr:        3.0e-4
+
+# --- OAR-weight curriculum ---
+# During the first lambda_oar_ramp_episodes patients of PPO training the
+# effective lambda_oar ramps linearly from
+#     lambda_oar * lambda_oar_ramp_start_factor
+# up to the full lambda_oar. This lets the agent learn to deliver dose
+# first (PTV reward dominates) before being heavily penalised for
+# incidental OAR irradiation. Set lambda_oar_ramp_episodes: 0 to disable.
+lambda_oar_ramp_episodes:     200
+lambda_oar_ramp_start_factor: 0.25
+
+# --- best.pt selection ---
+# Save best.pt by *validation DVH score* (lower is better) on the first
+# best_n_val_patients of cfg.eval_split, evaluated deterministically
+# every best_eval_every patients during PPO training. The legacy
+# training-reward rolling mean is kept as a diagnostic only.
+best_n_val_patients: 3
+best_eval_every:     25
+best_rolling_window: 10
