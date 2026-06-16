@@ -198,6 +198,75 @@ def _warmstart_actor(env: DoseEnv,
         )
 
 
+def _effective_lambda_oar(cfg, episode_index: int) -> float:
+    """Linearly ramp lambda_oar over the first ``lambda_oar_ramp_episodes``
+    patients of PPO training.
+
+    Starts at ``cfg.lambda_oar * cfg.lambda_oar_ramp_start_factor`` and
+    reaches the full ``cfg.lambda_oar`` at ``episode_index ==
+    cfg.lambda_oar_ramp_episodes``. After that it stays at the full
+    value. Setting ``cfg.lambda_oar_ramp_episodes`` to 0 disables the
+    ramp (returns ``cfg.lambda_oar`` immediately).
+    """
+    ramp_episodes = int(getattr(cfg, "lambda_oar_ramp_episodes", 0) or 0)
+    target = float(cfg.lambda_oar)
+    if ramp_episodes <= 0:
+        return target
+    start_factor = float(
+        getattr(cfg, "lambda_oar_ramp_start_factor", 0.25)
+    )
+    progress = min(1.0, max(0.0, episode_index / float(ramp_episodes)))
+    factor = start_factor + (1.0 - start_factor) * progress
+    return target * factor
+
+
+@torch.no_grad()
+def _validation_dvh_score(agent: PPO,
+                          val_env: DoseEnv,
+                          n_patients: int) -> float:
+    """Run ``n_patients`` deterministic rollouts and return the mean
+    DVH-score (lower is better) of the predicted vs ground-truth dose.
+
+    This is the criterion used to save ``best.pt``.  Uses the
+    ``val_env`` (a separate ``DoseEnv`` over ``cfg.eval_split``); does
+    NOT mutate the training env's lambda_oar/lambda_ptv.
+    """
+    from src.config import OAR_NAMES, PTV_NAMES  # local to avoid cycle in tests
+
+    if n_patients <= 0 or len(val_env.patient_ids) == 0:
+        return float("nan")
+
+    was_training = agent.net.training
+    agent.net.eval()
+    try:
+        scores = []
+        for patient_id in val_env.patient_ids[:n_patients]:
+            state, fraction_progress = val_env.reset(patient_id)
+            patient_done = False
+            while not patient_done:
+                action, _raw, _logp, _v = agent.act(
+                    state, fraction_progress, deterministic=True,
+                )
+                action_3d = action.reshape(
+                    val_env.cfg.n_beams,
+                    val_env.cfg.beamlet_h,
+                    val_env.cfg.beamlet_w,
+                )
+                state, fraction_progress, _r, _d, info = val_env.step(action_3d)
+                patient_done = bool(info["patient_done"])
+
+            predicted_dose = val_env.cumulative_dose
+            reference_dose = val_env._data["dose_gt"]
+            structure_masks = val_env._structure_masks()
+            scores.append(
+                dvh_score(predicted_dose, reference_dose, structure_masks)
+            )
+        return float(np.mean(scores)) if scores else float("nan")
+    finally:
+        if was_training:
+            agent.net.train()
+
+
 def main():
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("--config", default="configs/default.yaml")
@@ -210,6 +279,21 @@ def main():
         "--print-fractions", action="store_true",
         help="print per-fraction diagnostics (reward components, "
              "action stats, cumulative dose stats)",
+    )
+    arg_parser.add_argument(
+        "--resume", default=None, metavar="CKPT",
+        help="resume PPO from an existing checkpoint (skips warm-start "
+             "unless --force-warmstart is given)",
+    )
+    arg_parser.add_argument(
+        "--force-warmstart", action="store_true",
+        help="run the supervised warm-start even when --resume is set",
+    )
+    arg_parser.add_argument(
+        "--skip-warmstart", action="store_true",
+        help="skip the supervised actor warm-start regardless of "
+             "warmstart_enabled in the config (useful when reusing "
+             "runs/warmstart.pt)",
     )
     args = arg_parser.parse_args()
 
@@ -242,8 +326,22 @@ def main():
 
     Path(cfg.ckpt_dir).mkdir(parents=True, exist_ok=True)
 
+    # ---------------------------------------------------------------- resume
+    if args.resume is not None:
+        resume_path = Path(args.resume)
+        if not resume_path.is_file():
+            raise SystemExit(f"--resume checkpoint not found: {resume_path}")
+        agent.load(str(resume_path))
+        print(f"[resume] loaded {resume_path}")
+
     # ---------------------------------------------------------------- warm-start
-    if getattr(cfg, "warmstart_enabled", False) and cfg.warmstart_epochs > 0:
+    do_warmstart = (
+        getattr(cfg, "warmstart_enabled", False)
+        and cfg.warmstart_epochs > 0
+        and not args.skip_warmstart
+        and (args.resume is None or args.force_warmstart)
+    )
+    if do_warmstart:
         processed_split_root = Path(cfg.processed_dir) / cfg.train_split
         _warmstart_actor(
             env, agent, processed_split_root,
@@ -252,18 +350,52 @@ def main():
             lr=cfg.warmstart_lr,
         )
         agent.save(os.path.join(cfg.ckpt_dir, "warmstart.pt"))
+    elif args.skip_warmstart:
+        print("[train] --skip-warmstart given; warm-start phase skipped")
+    elif args.resume is not None:
+        print("[train] --resume given; warm-start phase skipped "
+              "(pass --force-warmstart to run it anyway)")
+
+    # ---------------------------------------------------------------- validation env
+    # A small, separate env over cfg.eval_split is used to score
+    # candidate policies for best.pt by DVH score (lower is better),
+    # which is the metric the project actually cares about.  We capped
+    # it at cfg.best_n_val_patients to keep the cost per check small.
+    n_val_patients = max(1, int(getattr(cfg, "best_n_val_patients", 3)))
+    try:
+        val_env = DoseEnv(cfg, split=cfg.eval_split)
+        n_val_available = min(n_val_patients, len(val_env.patient_ids))
+        if n_val_available == 0:
+            print(f"[val] no patients in split '{cfg.eval_split}'; "
+                  f"best.pt will fall back to training-reward criterion.")
+            val_env = None  # type: ignore[assignment]
+        else:
+            print(f"[val] using {n_val_available} patient(s) from "
+                  f"split '{cfg.eval_split}' for best.pt selection")
+    except FileNotFoundError as e:
+        print(f"[val] {e}; best.pt will fall back to training-reward criterion.")
+        val_env = None  # type: ignore[assignment]
 
     # ---------------------------------------------------------------- PPO loop
-    # ``best.pt`` is saved by *rolling-mean* patient reward over the last
-    # ``cfg.best_rolling_window`` patients, not a single patient's return
-    # (which used to pin best.pt to the easiest training patient).
+    # best.pt selection: validation DVH score (primary). The legacy
+    # rolling-mean training reward is kept only as a fallback when no
+    # validation patients are available (and as a printed diagnostic).
     recent_patient_rewards: deque[float] = deque(
         maxlen=max(int(cfg.best_rolling_window), 1)
     )
+    best_val_dvh = float("inf")
     best_rolling_mean_reward = -float("inf")
+    eval_every_best = max(1, int(getattr(cfg, "best_eval_every", 25)))
 
     progress_bar = trange(cfg.total_episodes, desc="train")
     for episode_index in progress_bar:
+        # OAR-weight curriculum: ramp lambda_oar over the first
+        # cfg.lambda_oar_ramp_episodes patients so PPO can learn to
+        # actually deliver dose before being heavily penalised for
+        # incidental OAR irradiation.
+        env.lambda_oar = _effective_lambda_oar(cfg, episode_index)
+        env.lambda_ptv = float(cfg.lambda_ptv)
+
         rollout, patient_total_reward = collect_patient(
             env, agent,
             print_fractions=args.print_fractions,
@@ -290,6 +422,7 @@ def main():
         progress_bar.set_postfix(
             R=f"{patient_total_reward:.2f}",
             Ravg=f"{np.mean(recent_patient_rewards):.2f}",
+            loar=f"{env.lambda_oar:.2f}",
             pi=f"{stats['policy_loss']:.3f}",
             v=f"{stats['value_loss']:.3f}",
             mu=f"{actor_mu_bias_mean:+.3f}",
@@ -298,11 +431,31 @@ def main():
             a_max=f"{last_action.max():.2f}",
         )
 
-        if len(recent_patient_rewards) >= recent_patient_rewards.maxlen:
+        # Periodic validation-DVH check for best.pt (primary criterion).
+        if val_env is not None and (episode_index + 1) % eval_every_best == 0:
+            val_dvh = _validation_dvh_score(agent, val_env, n_val_patients)
+            tqdm.write(
+                f"  [val ep {episode_index + 1}] "
+                f"mean DVH score on {n_val_patients} patient(s) = "
+                f"{val_dvh:.3f}  "
+                f"(best so far: "
+                f"{best_val_dvh if np.isfinite(best_val_dvh) else float('nan'):.3f})"
+            )
+            if np.isfinite(val_dvh) and val_dvh < best_val_dvh:
+                best_val_dvh = val_dvh
+                agent.save(os.path.join(cfg.ckpt_dir, "best.pt"))
+                tqdm.write(
+                    f"  [val ep {episode_index + 1}] saved best.pt "
+                    f"(DVH score {val_dvh:.3f})"
+                )
+
+        # Fallback rolling-mean criterion only when no validation env.
+        if val_env is None and len(recent_patient_rewards) >= recent_patient_rewards.maxlen:
             rolling_mean = float(np.mean(recent_patient_rewards))
             if rolling_mean > best_rolling_mean_reward:
                 best_rolling_mean_reward = rolling_mean
                 agent.save(os.path.join(cfg.ckpt_dir, "best.pt"))
+
         if (episode_index + 1) % cfg.eval_every == 0:
             agent.save(
                 os.path.join(cfg.ckpt_dir, f"ep{episode_index + 1}.pt")
@@ -311,6 +464,20 @@ def main():
     # Always keep a final checkpoint, even if total_episodes is not a
     # multiple of eval_every.
     agent.save(os.path.join(cfg.ckpt_dir, "last.pt"))
+
+    # Final validation pass so the user sees the end-of-training DVH
+    # score and so best.pt has a chance to be updated by the very last
+    # policy if it improved between the last periodic check and the
+    # end of training.
+    if val_env is not None:
+        final_val_dvh = _validation_dvh_score(agent, val_env, n_val_patients)
+        print(f"[final val] mean DVH score on "
+              f"{n_val_patients} patient(s) = {final_val_dvh:.3f}")
+        if np.isfinite(final_val_dvh) and final_val_dvh < best_val_dvh:
+            best_val_dvh = final_val_dvh
+            agent.save(os.path.join(cfg.ckpt_dir, "best.pt"))
+            print(f"[final val] saved best.pt (DVH score {final_val_dvh:.3f})")
+        print(f"[final val] best DVH score across run: {best_val_dvh:.3f}")
 
 
 if __name__ == "__main__":
