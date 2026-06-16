@@ -1,26 +1,56 @@
-# Virtual environment
-.venv/
-venv/
-env/
+# Virtual environments (anchored so a folder named "env" inside src/ is NOT ignored)
+/.venv/
+/venv/
+/env/
 
 # Python cache
 __pycache__/
 *.py[cod]
 
-# Large data files — never commit these
-data/raw/
-data/processed/
-*.npy
-*.nii
-*.nii.gz
-*.dcm
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+# By default ignore everything under data/original/ and data/processed/
+# (CSVs / NPYs / NPZs from OpenKBP are huge and not redistributable in bulk).
+# We then *un-ignore* a single demo patient (pt_241) so the repo ships with a
+# runnable example. Add more `!` lines here if you want to commit additional
+# patients.
+/data/original/**
+/data/processed/**
 
-# Model checkpoints
-runs/
+# Keep the directory tree itself reachable so the negations below resolve.
+!/data/
+!/data/original/
+!/data/original/test/
+!/data/processed/
+!/data/processed/test/
+
+# Demo patient — original CSVs.
+!/data/original/test/pt_241/
+!/data/original/test/pt_241/**
+
+# Demo patient — preprocessed arrays + dose-influence matrix + warm-start.
+!/data/processed/test/pt_241/
+!/data/processed/test/pt_241/**
+
+# Numpy / NIfTI / DICOM blobs anywhere ELSE under data/ stay ignored.
+/data/**/*.npy
+/data/**/*.npz
+/data/**/*.nii
+/data/**/*.nii.gz
+/data/**/*.dcm
+# Re-allow them for the demo patient.
+!/data/original/test/pt_241/**
+!/data/processed/test/pt_241/**
+
+# ---------------------------------------------------------------------------
+# Model checkpoints / training artefacts
+# ---------------------------------------------------------------------------
+/runs/
 *.zip
 
-# Plots
-*.png
+# Plots (anchored: only top-level scratch PNGs; figures under docs/ are kept).
+/*.png
 
 # Jupyter
 .ipynb_checkpoints/
@@ -32,7 +62,7 @@ Thumbs.db
 # Secrets
 *.env
 
-*Archive*
-*data*
-*.lec_txt*
-*Lectures*
+# Local lecture / archive notes (anchored — won't match src/Archive.py etc.).
+/Archive/
+/.lec_txt/
+/Lectures/
