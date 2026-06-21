@@ -208,35 +208,97 @@ def print_results_table(results: Sequence[Dict],
 
 
 def print_config_summary(cfg, config_path: str) -> None:
-    """Print the reward-relevant YAML parameters used in this evaluation run."""
+    """Print every user-controllable hyperparameter that can influence results.
+
+    Anything in this block is something *you* set in the YAML (or via the
+    Config dataclass defaults) and that can change evaluation numbers.
+    """
     sep = "=" * 60
+    sub = "-" * 60
     print(f"\n{sep}")
     print(f"  CONFIG SNAPSHOT  ({config_path})")
     print(sep)
 
-    print(f"  {'lambda_ptv':<28} {cfg.lambda_ptv}")
-    print(f"  {'lambda_oar':<28} {cfg.lambda_oar}")
-    print(f"  {'oar_voxel_subweight':<28} {cfg.oar_voxel_subweight}")
-    print(f"  {'oar_mean_subweight':<28} {cfg.oar_mean_subweight}")
-    print(f"  {'oar_dmax_subweight':<28} {cfg.oar_dmax_subweight}")
+    # --- data / geometry ---
+    print(f"  [data / geometry]")
+    print(f"    {'raw_dir':<28} {cfg.raw_dir}")
+    print(f"    {'processed_dir':<28} {cfg.processed_dir}")
+    print(f"    {'train_split':<28} {cfg.train_split}")
+    print(f"    {'eval_split':<28} {cfg.eval_split}")
+    print(f"    {'grid':<28} {cfg.grid}")
+    print(f"    {'n_fractions':<28} {cfg.n_fractions}")
 
-    print(f"\n  OAR tolerances (Gy):")
-    for oar, tol in cfg.oar_tolerance.items():
-        serial = cfg.oar_serial.get(oar, False)
-        serial_tag = " [serial]" if serial else ""
-        print(f"    {oar:<22} {tol}{serial_tag}")
+    # --- beam geometry ---
+    print(f"\n  [beam geometry]")
+    print(f"    {'n_beams':<28} {cfg.n_beams}")
+    print(f"    {'beamlet_h':<28} {cfg.beamlet_h}")
+    print(f"    {'beamlet_w':<28} {cfg.beamlet_w}")
+    print(f"    {'n_beamlets (derived)':<28} {cfg.n_beamlets}")
 
-    print(f"\n  OAR weights:")
-    for oar, w in cfg.oar_weights.items():
-        print(f"    {oar:<22} {w}")
-
-    print(f"\n  Prescriptions (Gy):")
+    # --- prescriptions ---
+    print(f"\n  [prescriptions (Gy, full course)]")
     for ptv, rx in cfg.prescription.items():
-        print(f"    {ptv:<22} {rx}")
+        print(f"    {ptv:<28} {rx}")
 
-    print(f"\n  n_fractions: {cfg.n_fractions}  |  "
-          f"n_beams: {cfg.n_beams}  |  "
-          f"grid: {cfg.grid}")
+    # --- OAR tolerances + weights + serial flags ---
+    print(f"\n  [OAR tolerances (Gy) / weights / serial]")
+    for oar in cfg.oar_tolerance:
+        tol = cfg.oar_tolerance[oar]
+        w = cfg.oar_weights.get(oar, 1.0)
+        serial = cfg.oar_serial.get(oar, False)
+        serial_tag = "serial" if serial else "parallel"
+        print(f"    {oar:<22} tol={tol:<6}  w={w:<5}  [{serial_tag}]")
+
+    # --- reward weights ---
+    print(f"\n  [reward weights]")
+    print(f"    {'lambda_ptv':<28} {cfg.lambda_ptv}")
+    print(f"    {'lambda_oar':<28} {cfg.lambda_oar}")
+    print(f"    {'oar_voxel_subweight':<28} {cfg.oar_voxel_subweight}")
+    print(f"    {'oar_mean_subweight':<28} {cfg.oar_mean_subweight}")
+    print(f"    {'oar_dmax_subweight':<28} {cfg.oar_dmax_subweight}")
+
+    # --- PPO ---
+    print(f"\n  [PPO]")
+    print(f"    {'gamma':<28} {cfg.gamma}")
+    print(f"    {'gae_lambda':<28} {cfg.gae_lambda}")
+    print(f"    {'clip_eps':<28} {cfg.clip_eps}")
+    print(f"    {'ent_coef':<28} {cfg.ent_coef}")
+    print(f"    {'vf_coef':<28} {cfg.vf_coef}")
+    print(f"    {'lr':<28} {cfg.lr}")
+    print(f"    {'ppo_epochs':<28} {cfg.ppo_epochs}")
+    print(f"    {'minibatch':<28} {cfg.minibatch}")
+
+    # --- training loop ---
+    print(f"\n  [training loop]")
+    print(f"    {'total_episodes':<28} {cfg.total_episodes}")
+    print(f"    {'eval_every':<28} {cfg.eval_every}")
+    print(f"    {'seed':<28} {cfg.seed}")
+    print(f"    {'device':<28} {cfg.device}")
+    print(f"    {'ckpt_dir':<28} {cfg.ckpt_dir}")
+
+    # --- warm-start (supervised actor pretraining) ---
+    print(f"\n  [warm-start (supervised actor pretrain)]")
+    print(f"    {'warmstart_enabled':<28} {cfg.warmstart_enabled}")
+    print(f"    {'warmstart_epochs':<28} {cfg.warmstart_epochs}")
+    print(f"    {'warmstart_minibatch':<28} {cfg.warmstart_minibatch}")
+    print(f"    {'warmstart_lr':<28} {cfg.warmstart_lr}")
+
+    # --- OAR-weight curriculum ---
+    print(f"\n  [OAR-weight curriculum]")
+    print(f"    {'lambda_oar_ramp_episodes':<28} {cfg.lambda_oar_ramp_episodes}")
+    print(f"    {'lambda_oar_ramp_start_factor':<28} {cfg.lambda_oar_ramp_start_factor}")
+
+    # --- best.pt selection ---
+    print(f"\n  [best.pt selection]")
+    print(f"    {'best_n_val_patients':<28} {cfg.best_n_val_patients}")
+    print(f"    {'best_eval_every':<28} {cfg.best_eval_every}")
+    print(f"    {'best_rolling_window':<28} {cfg.best_rolling_window}")
+
+    print(sub)
+    print("  (Every value above is set by you in the YAML / Config and can "
+          "change\n   evaluation numbers. PPO/training/warm-start/curriculum "
+          "knobs only\n   affect results indirectly via the checkpoint that "
+          "produced runs/best.pt.)")
     print(sep)
 
 
