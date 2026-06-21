@@ -26,12 +26,15 @@ oar_tolerance:
   RightParotid: 26.0
 
 # Per-OAR multiplier inside the OAR penalty (1.0 = neutral).
+# Iteration-2 (2026-06-20): after Tier-1/2 the parotids were still ~90-110%
+# over their 26 Gy mean tol while serial OARs had large slack. Push parotid
+# weights further; serials stay down-weighted (the dose budget moves to them).
 oar_weights:
-  Brainstem:    1.0
-  SpinalCord:   1.0
-  Mandible:     1.0
-  LeftParotid:  1.0
-  RightParotid: 1.0
+  Brainstem:    0.5
+  SpinalCord:   0.6
+  Mandible:     0.5
+  LeftParotid:  1.6
+  RightParotid: 1.6
 
 # Serial OARs (single hot voxel is catastrophic) get an extra Dmax term.
 oar_serial:
@@ -42,30 +45,41 @@ oar_serial:
   RightParotid: false
 
 # --- reward weights ---
-lambda_oar:           1.0
+# Iteration-2 (2026-06-20): after Tier-1 D95 went from ~37 Gy -> ~52 Gy but
+# is still ~25% short of Rx. Small extra PTV push; OAR-side rebalancing
+# now happens via per-OAR weights (parotids 1.6) rather than global lambda.
+lambda_oar:           0.6
 # Sub-mix inside the OAR penalty: voxel is the main term, mean is a small
-# stabiliser, dmax fires only for serial OARs above.
+# stabiliser, dmax fires only for serial OARs above. mean_subweight was
+# already raised in Tier-2 to handle parallel-OAR (parotid) mean dose.
 oar_voxel_subweight:  1.0
-oar_mean_subweight:   0.2
+oar_mean_subweight:   0.35
 oar_dmax_subweight:   1.0
 # Per-fraction PTV reward weight.  Each fraction is its own PPO episode;
 # the agent is rewarded for delivering its fair share of the remaining PTV
 # gap (target_voxel = max(prescription - cumulative_dose_before, 0)
 #                       / fractions_remaining).
-lambda_ptv:           1.5
+lambda_ptv:           3.5
 
 # --- PPO ---
+# Iteration-2 (2026-06-20): previous run found best.pt at ep 25 and the val
+# DVH score degraded sharply afterwards (25 -> 33), i.e. PPO was overshooting
+# off the warm-start. Halve LR to stabilise. ent_coef/ppo_epochs kept from
+# Tier-3.
 gamma:           0.995
 gae_lambda:      0.95
 clip_eps:        0.2
-ent_coef:        0.01
+ent_coef:        0.005
 vf_coef:         0.5
-lr:              3.0e-4
-ppo_epochs:      4
+lr:              1.5e-4
+ppo_epochs:      6
 minibatch:       64
 
 # --- training ---
-total_episodes:  2000
+# Tier-3: 3500 episodes (with 200 train patients each visited ~17 times via
+# random sampling) so the 600-episode OAR curriculum completes and PPO has
+# ample episodes at full lambda_oar to refine the warm-start plan.
+total_episodes:  3500
 eval_every:      50
 seed:            42
 device:          cuda           # falls back to cpu automatically
@@ -75,8 +89,10 @@ ckpt_dir:        runs
 # Pretrain the actor head to predict the cached per-patient NNLS
 # beamlet plan (a* = argmin_{a>=0} ||DIM @ a - dose_gt/n_fractions||^2)
 # before PPO begins. Run scripts/compute_warmstart_actions.py first.
+# Tier-1: triple SL epochs so PPO starts near a feasible plan rather than
+# near zero -- this is the main lever for fixing PTV underdose at start.
 warmstart_enabled:   true
-warmstart_epochs:    10
+warmstart_epochs:    30
 warmstart_minibatch: 4
 warmstart_lr:        3.0e-4
 
@@ -87,14 +103,20 @@ warmstart_lr:        3.0e-4
 # up to the full lambda_oar. This lets the agent learn to deliver dose
 # first (PTV reward dominates) before being heavily penalised for
 # incidental OAR irradiation. Set lambda_oar_ramp_episodes: 0 to disable.
-lambda_oar_ramp_episodes:     200
-lambda_oar_ramp_start_factor: 0.25
+# Tier-1: stretch ramp to ~30% of training and start almost OAR-free so the
+# policy commits to PTV coverage before OAR pressure ramps up.
+lambda_oar_ramp_episodes:     600
+lambda_oar_ramp_start_factor: 0.10
 
 # --- best.pt selection ---
 # Save best.pt by *validation DVH score* (lower is better) on the first
 # best_n_val_patients of cfg.eval_split, evaluated deterministically
 # every best_eval_every patients during PPO training. The legacy
 # training-reward rolling mean is kept as a diagnostic only.
-best_n_val_patients: 3
+# Iteration-2: bump n_val_patients 3 -> 6. With only 3 patients the
+# previous best.pt scored 25.1 but the true 40-patient mean was 27.95,
+# i.e. the selection criterion was noisy enough to lock in an early
+# post-warm-start checkpoint before PPO had time to refine.
+best_n_val_patients: 6
 best_eval_every:     25
 best_rolling_window: 10

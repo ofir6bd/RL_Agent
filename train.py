@@ -311,10 +311,19 @@ def main():
             f"{cfg.processed_dir}/{cfg.train_split}"
         )
 
-    # default: one episode (= one patient = 35 fractions = 1 PPO update)
-    # per processed patient.  Override with --episodes for longer runs.
-    if args.episodes is None:
+    # Episode count resolution:
+    #   1) --episodes on the CLI always wins (already applied above).
+    #   2) Otherwise respect cfg.total_episodes from the YAML.
+    #   3) Fall back to n_patients only when cfg.total_episodes is unset
+    #      or non-positive. (Older runs silently overwrote the YAML value
+    #      with n_patients, which made YAML's total_episodes meaningless
+    #      and capped training at one pass through the train split.)
+    if args.episodes is None and (
+        not getattr(cfg, "total_episodes", 0)
+        or int(cfg.total_episodes) <= 0
+    ):
         cfg.total_episodes = n_patients
+    cfg.total_episodes = int(cfg.total_episodes)
     print(f"[train] {n_patients} patient(s) found, "
           f"running {cfg.total_episodes} patient-episode(s) "
           f"(1 PPO update per patient, {cfg.n_fractions} fractions buffered)")

@@ -1,0 +1,489 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RL Agent · Radiation Therapy Planner</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg:        #0f1117;
+            --surface:   #1a1d27;
+            --surface2:  #22263a;
+            --border:    #2e3354;
+            --primary:   #4f8ef7;
+            --primary-d: #2563eb;
+            --success:   #22c55e;
+            --warning:   #f59e0b;
+            --danger:    #ef4444;
+            --text:      #e2e8f0;
+            --muted:     #8892b0;
+            --sidebar-w: 310px;
+        }
+        body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; flex-direction:column; }
+        header { background:linear-gradient(135deg,#1a1d27 0%,#12172e 100%); border-bottom:1px solid var(--border); padding:0 28px; height:64px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; box-shadow:0 4px 24px rgba(0,0,0,.4); }
+        .header-brand { display:flex; align-items:center; gap:12px; }
+        .header-brand .logo { width:36px; height:36px; background:linear-gradient(135deg,var(--primary) 0%,var(--primary-d) 100%); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px; }
+        .header-brand h1 { font-size:18px; font-weight:700; letter-spacing:-.3px; }
+        .header-brand span { font-size:12px; color:var(--muted); display:block; }
+        .header-status { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+        .status-dot { width:8px; height:8px; border-radius:50%; background:var(--success); box-shadow:0 0 6px var(--success); }
+        .layout { display:flex; flex:1; overflow:hidden; height:calc(100vh - 64px); }
+        .sidebar { width:var(--sidebar-w); min-width:var(--sidebar-w); background:var(--surface); border-right:1px solid var(--border); overflow-y:auto; display:flex; flex-direction:column; }
+        .sidebar-section { padding:18px 16px 14px; border-bottom:1px solid var(--border); }
+        .sidebar-section h3 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin-bottom:12px; }
+        .patient-select-wrap { display:flex; flex-direction:column; gap:8px; }
+        .select-row { display:flex; gap:6px; }
+        select { flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:9px 12px; font-size:13px; outline:none; cursor:pointer; }
+        select:focus { border-color:var(--primary); }
+        .btn { padding:9px 16px; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; transition:all .2s; white-space:nowrap; }
+        .btn:disabled { opacity:.4; cursor:not-allowed; }
+        .btn-primary { background:linear-gradient(135deg,var(--primary) 0%,var(--primary-d) 100%); color:white; box-shadow:0 2px 8px rgba(79,142,247,.3); }
+        .btn-primary:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 4px 12px rgba(79,142,247,.4); }
+        .btn-ghost { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+        .btn-ghost:hover:not(:disabled) { background:var(--border); }
+        .btn-run { width:100%; padding:11px; font-size:14px; background:linear-gradient(135deg,var(--primary) 0%,var(--primary-d) 100%); color:white; box-shadow:0 2px 12px rgba(79,142,247,.3); }
+        .btn-run:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 4px 18px rgba(79,142,247,.45); }
+        .ptv-card { background:var(--surface2); border-radius:10px; padding:12px; margin-bottom:8px; border:1px solid var(--border); }
+        .ptv-card:last-child { margin-bottom:0; }
+        .ptv-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .ptv-name { font-size:13px; font-weight:700; }
+        .ptv-dose { font-size:12px; color:var(--muted); }
+        .ptv-progress { height:6px; background:rgba(255,255,255,.08); border-radius:3px; overflow:hidden; margin-bottom:5px; }
+        .ptv-fill { height:100%; border-radius:3px; transition:width .5s ease; }
+        .ptv-meta { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); }
+        .ptv-meta .achieved { color:var(--success); }
+        .ptv-meta .warn { color:var(--warning); }
+        .oar-row { display:flex; align-items:center; gap:10px; padding:9px 10px; background:var(--surface2); border-radius:8px; margin-bottom:6px; border:1px solid var(--border); transition:border-color .3s; }
+        .oar-row.violation { border-color:rgba(239,68,68,.5); background:rgba(239,68,68,.05); }
+        .oar-row:last-child { margin-bottom:0; }
+        .oar-icon { width:28px; height:28px; border-radius:6px; background:rgba(79,142,247,.15); display:flex; align-items:center; justify-content:center; font-size:13px; }
+        .oar-info { flex:1; min-width:0; }
+        .oar-info .oar-name { font-size:12px; font-weight:600; }
+        .oar-bar-wrap { height:4px; background:rgba(255,255,255,.08); border-radius:2px; margin-top:3px; }
+        .oar-bar { height:100%; border-radius:2px; transition:width .5s ease; }
+        .oar-value { font-size:12px; font-weight:700; text-align:right; min-width:48px; }
+        .main { flex:1; overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:20px; }
+        .welcome { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; text-align:center; padding:40px; }
+        .welcome-icon { font-size:64px; margin-bottom:20px; }
+        .welcome h2 { font-size:26px; font-weight:700; margin-bottom:10px; }
+        .welcome p { color:var(--muted); font-size:15px; max-width:460px; line-height:1.6; }
+        .welcome-steps { display:flex; gap:24px; margin-top:32px; }
+        .step-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 20px; width:140px; text-align:center; }
+        .step-num { width:28px; height:28px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; margin:0 auto 10px; }
+        .step-card p { font-size:12px; color:var(--muted); line-height:1.4; }
+        .fraction-bar { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 20px; display:flex; align-items:center; gap:16px; }
+        .frac-label { font-size:22px; font-weight:700; }
+        .frac-sub { font-size:12px; color:var(--muted); }
+        .frac-track { display:flex; gap:3px; height:8px; margin-bottom:4px; }
+        .frac-pip { flex:1; border-radius:2px; background:rgba(255,255,255,.08); transition:background .3s; }
+        .frac-pip.done { background:var(--primary); }
+        .frac-pip.current { background:var(--warning); box-shadow:0 0 6px var(--warning); }
+        .frac-progress-label { font-size:10px; color:var(--muted); }
+        .metrics-row { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+        .metric-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; }
+        .metric-card .mc-label { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:6px; }
+        .metric-card .mc-value { font-size:28px; font-weight:700; line-height:1; }
+        .metric-card .mc-sub { font-size:11px; color:var(--muted); margin-top:4px; }
+        .section-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; }
+        .section-title { font-size:14px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+        .section-title .tag { font-size:10px; padding:2px 8px; background:rgba(79,142,247,.15); color:var(--primary); border-radius:20px; font-weight:600; }
+        .beam-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+        .beam-item { background:var(--surface2); border-radius:8px; padding:10px; text-align:center; }
+        .beam-item canvas { width:72%; max-width:92px; border-radius:4px; display:block; margin:0 auto; }
+        .beam-item .beam-label { font-size:11px; color:var(--muted); margin-bottom:6px; font-weight:600; }
+        .colorbar { display:flex; align-items:center; gap:10px; margin-top:12px; font-size:11px; color:var(--muted); }
+        .colorbar-gradient { flex:1; height:8px; border-radius:4px; background:linear-gradient(90deg,hsl(240,100%,50%),hsl(120,100%,50%),hsl(60,100%,50%),hsl(0,100%,50%)); }
+        .summary-banner { background:linear-gradient(135deg,#1a2a1a 0%,#1a1d27 100%); border:1px solid rgba(34,197,94,.3); border-radius:12px; padding:24px; text-align:center; }
+        .summary-banner h2 { font-size:22px; font-weight:700; margin-bottom:6px; }
+        .summary-banner p { color:var(--muted); font-size:14px; }
+        .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .summary-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; }
+        .summary-card h4 { font-size:13px; font-weight:700; margin-bottom:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+        .summary-row { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; }
+        .summary-row:last-child { border-bottom:none; }
+        .badge { font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; }
+        .badge-success { background:rgba(34,197,94,.15); color:var(--success); }
+        .badge-danger  { background:rgba(239,68,68,.15); color:var(--danger); }
+        .badge-warn    { background:rgba(245,158,11,.15); color:var(--warning); }
+        #loading-overlay { display:none; position:fixed; inset:0; background:rgba(15,17,23,.85); z-index:200; align-items:center; justify-content:center; flex-direction:column; gap:16px; }
+        #loading-overlay.show { display:flex; }
+        .spinner { width:48px; height:48px; border:3px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin .9s linear infinite; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        .loading-text { font-size:15px; font-weight:600; }
+        .loading-sub { font-size:12px; color:var(--muted); }
+        .error-banner { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.4); border-radius:10px; padding:14px 18px; color:#fca5a5; font-size:13px; display:none; }
+        .error-banner.show { display:block; }
+        .reward-chart-wrap { height:140px; position:relative; }
+        .reward-chart-canvas { width:100% !important; height:100% !important; }
+        ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loading-text">Computing...</div>
+    <div class="loading-sub" id="loading-sub">Please wait</div>
+</div>
+
+<header>
+    <div class="header-brand">
+        <div class="logo">🎯</div>
+        <div>
+            <h1>RL Radiation Therapy Planner</h1>
+            <span>OpenKBP · PPO Agent · 35 Fractions</span>
+        </div>
+    </div>
+    <div class="header-status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Connecting...</span>
+    </div>
+</header>
+
+<div class="layout">
+
+    <aside class="sidebar">
+        <div class="sidebar-section">
+            <h3>Patient Selection</h3>
+            <div class="patient-select-wrap">
+                <div class="select-row">
+                    <select id="patientSelect"><option>Loading...</option></select>
+                    <button class="btn btn-ghost" id="randomBtn" title="Random patient">🎲</button>
+                </div>
+                <button class="btn btn-run" id="simulateBtn" disabled>▶ Run Full Simulation</button>
+            </div>
+        </div>
+        <div class="sidebar-section">
+            <h3>PTV Dose Buckets</h3>
+            <div id="ptvPanel"><div style="color:var(--muted);font-size:12px;text-align:center;padding:20px 0">Run a simulation to see PTV coverage</div></div>
+        </div>
+        <div class="sidebar-section">
+            <h3>OAR Monitoring</h3>
+            <div id="oarPanel"><div style="color:var(--muted);font-size:12px;text-align:center;padding:20px 0">Run a simulation to see OAR doses</div></div>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="error-banner" id="errorBanner"></div>
+
+        <!-- Welcome -->
+        <div class="welcome" id="welcomeView">
+            <div class="welcome-icon">🧬</div>
+            <h2>Welcome to the RL Therapy Planner</h2>
+            <p>Select a patient from the panel on the left and click <strong>Run Full Simulation</strong> to watch the PPO agent plan all 35 treatment fractions in real time.</p>
+            <div class="welcome-steps">
+                <div class="step-card"><div class="step-num">1</div><p>Choose a patient from the dropdown</p></div>
+                <div class="step-card"><div class="step-num">2</div><p>Click Run Simulation — all 35 fractions computed</p></div>
+                <div class="step-card"><div class="step-num">3</div><p>Step through fractions, explore beam and dose maps</p></div>
+            </div>
+        </div>
+
+        <!-- Simulation view -->
+        <div id="simView" style="display:none;flex-direction:column;gap:20px;">
+            <div class="fraction-bar">
+                <div>
+                    <div class="frac-label">Fraction <span id="fracNum">1</span> / <span id="fracTotal">35</span></div>
+                    <div class="frac-sub" id="fracMode">Live Agent · PPO</div>
+                </div>
+                <div style="flex:1;padding:0 20px;">
+                    <div class="frac-track" id="fracTrack"></div>
+                    <div class="frac-progress-label" id="fracProgressLabel"></div>
+                </div>
+                <button class="btn btn-ghost" id="prevBtn">← Prev</button>
+                <button class="btn btn-primary" id="nextBtn">Next →</button>
+                <button class="btn btn-ghost" id="summaryBtn">📊 Summary</button>
+            </div>
+
+            <div class="metrics-row">
+                <div class="metric-card"><div class="mc-label">Total Reward</div><div class="mc-value" id="mReward" style="color:var(--primary)">—</div><div class="mc-sub">this fraction</div></div>
+                <div class="metric-card"><div class="mc-label">PTV Reward</div><div class="mc-value" id="mPTV" style="color:var(--success)">—</div><div class="mc-sub">target coverage</div></div>
+                <div class="metric-card"><div class="mc-label">OAR Penalty</div><div class="mc-value" id="mOAR" style="color:var(--danger)">—</div><div class="mc-sub">dose violation</div></div>
+                <div class="metric-card"><div class="mc-label">Peak Beamlet</div><div class="mc-value" id="mAction" style="color:var(--warning)">—</div><div class="mc-sub">max action intensity</div></div>
+            </div>
+
+            <div class="section-card">
+                <div class="section-title">📈 Reward History <span class="tag">All fractions</span></div>
+                <div class="reward-chart-wrap"><canvas id="rewardChart" class="reward-chart-canvas"></canvas></div>
+            </div>
+
+            <div class="section-card">
+                <div class="section-title">🔥 Beam Intensity Map <span class="tag">9 beams · 16×16 beamlets</span></div>
+                <div class="beam-grid" id="beamGrid"></div>
+                <div class="colorbar"><span>Low</span><div class="colorbar-gradient"></div><span>High</span></div>
+            </div>
+        </div>
+
+        <!-- Summary view -->
+        <div id="summaryView" style="display:none;flex-direction:column;gap:20px;">
+            <div class="summary-banner">
+                <div style="font-size:40px;margin-bottom:10px;">✅</div>
+                <h2>Treatment Plan Complete</h2>
+                <p id="summaryPatientLabel">Patient — · 35 fractions delivered</p>
+            </div>
+            <div class="metrics-row">
+                <div class="metric-card"><div class="mc-label">Total Reward</div><div class="mc-value" id="sTotalReward" style="color:var(--primary)">—</div></div>
+                <div class="metric-card"><div class="mc-label">Avg / Fraction</div><div class="mc-value" id="sAvgReward" style="color:var(--primary)">—</div></div>
+                <div class="metric-card"><div class="mc-label">PTVs on Target</div><div class="mc-value" id="sPTVok" style="color:var(--success)">—</div></div>
+                <div class="metric-card"><div class="mc-label">OAR Violations</div><div class="mc-value" id="sOARviol" style="color:var(--danger)">—</div></div>
+            </div>
+            <div class="summary-grid">
+                <div class="summary-card"><h4>PTV Coverage</h4><div id="summaryPTV"></div></div>
+                <div class="summary-card"><h4>OAR Final Doses</h4><div id="summaryOAR"></div></div>
+            </div>
+            <div style="text-align:center;">
+                <button class="btn btn-primary" id="backToFracBtn">← Back to Fractions</button>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<script>
+const API = 'http://localhost:5000/api';
+let config = null, simData = null, fracIdx = 0;
+
+const $ = id => document.getElementById(id);
+const patientSelect = $('patientSelect'), randomBtn = $('randomBtn'),
+      simulateBtn = $('simulateBtn'), prevBtn = $('prevBtn'),
+      nextBtn = $('nextBtn'), summaryBtn = $('summaryBtn'),
+      backToFracBtn = $('backToFracBtn');
+
+const PTV_COLORS = { PTV70:'#4f8ef7', PTV63:'#a78bfa', PTV56:'#34d399' };
+const OAR_ICONS  = { Brainstem:'🧠', SpinalCord:'🦴', Mandible:'🦷', LeftParotid:'💧', RightParotid:'💧' };
+
+function num(v, d=3) { const n=parseFloat(v); return isNaN(n)?'—':n.toFixed(d); }
+function doseColor(dose, max) { const t=Math.max(0,Math.min(1,dose/(max||1))); return `hsl(${(1-t)*240},100%,55%)`; }
+
+function showLoading(msg='Computing...', sub='') { $('loading-text').textContent=msg; $('loading-sub').textContent=sub; $('loading-overlay').classList.add('show'); }
+function hideLoading() { $('loading-overlay').classList.remove('show'); }
+function showError(msg) { const b=$('errorBanner'); b.textContent='⚠ '+msg; b.classList.add('show'); setTimeout(()=>b.classList.remove('show'),8000); }
+function setStatus(ok) {
+    $('statusDot').style.background  = ok ? 'var(--success)' : 'var(--danger)';
+    $('statusDot').style.boxShadow   = ok ? '0 0 6px var(--success)' : 'none';
+    $('statusText').textContent      = ok ? 'Backend connected' : 'Backend offline';
+}
+
+function showWelcome()  { $('welcomeView').style.display='flex';  $('simView').style.display='none';  $('summaryView').style.display='none'; }
+function showSimView()  { $('welcomeView').style.display='none';  $('simView').style.display='flex';  $('summaryView').style.display='none'; }
+function showSummary()  { $('welcomeView').style.display='none';  $('simView').style.display='none';  $('summaryView').style.display='flex'; }
+
+// Sidebar
+function updateSidebar(fraction) {
+    const organs = fraction.cumulative_organ_doses || {};
+    const presc  = config.ptv_prescriptions || {};
+    const tols   = config.oar_tolerances    || {};
+
+    let ptvHtml = '';
+    for (const ptv of (config.ptv_names || [])) {
+        const dose = organs[ptv] || 0, rx = presc[ptv] || 70;
+        const pct  = Math.min((dose/rx)*100, 100);
+        const col  = PTV_COLORS[ptv] || 'var(--primary)';
+        const ok   = pct >= 95;
+        ptvHtml += `<div class="ptv-card">
+            <div class="ptv-head"><span class="ptv-name" style="color:${col}">${ptv}</span><span class="ptv-dose">${dose.toFixed(1)} / ${rx} Gy</span></div>
+            <div class="ptv-progress"><div class="ptv-fill" style="width:${pct.toFixed(1)}%;background:${col}"></div></div>
+            <div class="ptv-meta"><span>${pct.toFixed(1)}% coverage</span><span class="${ok?'achieved':'warn'}">${ok?'✓ On target':'⚡ Below 95%'}</span></div>
+        </div>`;
+    }
+    $('ptvPanel').innerHTML = ptvHtml || '<div style="color:var(--muted);font-size:12px">No PTV data</div>';
+
+    let oarHtml = '';
+    for (const oar of (config.oar_names || [])) {
+        const dose = organs[oar] || 0, tol = tols[oar] || 60;
+        const pct  = Math.min((dose/tol)*100, 100);
+        const viol = dose > tol;
+        const col  = viol ? 'var(--danger)' : pct > 80 ? 'var(--warning)' : 'var(--success)';
+        const icon = OAR_ICONS[oar] || '🫀';
+        oarHtml += `<div class="oar-row ${viol?'violation':''}">
+            <div class="oar-icon">${icon}</div>
+            <div class="oar-info"><div class="oar-name">${oar}</div>
+                <div class="oar-bar-wrap"><div class="oar-bar" style="width:${pct.toFixed(1)}%;background:${col}"></div></div>
+            </div>
+            <div class="oar-value" style="color:${col}">${dose.toFixed(1)}<br><span style="font-size:10px;color:var(--muted)">/${tol}Gy</span></div>
+        </div>`;
+    }
+    $('oarPanel').innerHTML = oarHtml || '<div style="color:var(--muted);font-size:12px">No OAR data</div>';
+}
+
+// Fraction pip track
+function buildFracTrack(total) {
+    const t = $('fracTrack'); t.innerHTML = '';
+    for (let i=0;i<total;i++) { const p=document.createElement('div'); p.className='frac-pip'; p.id=`pip_${i}`; t.appendChild(p); }
+}
+function updateFracTrack(idx) {
+    document.querySelectorAll('.frac-pip').forEach((p,i) => {
+        p.className = 'frac-pip';
+        if (i < idx) p.classList.add('done');
+        if (i === idx) p.classList.add('current');
+    });
+    $('fracProgressLabel').textContent = `${idx+1} of ${simData.fractions.length} fractions`;
+}
+
+// Reward sparkline
+function drawRewardChart() {
+    if (!simData) return;
+    const canvas = $('rewardChart');
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    if (!W || !H) return;
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const rewards = simData.fractions.map(f => f.reward || 0);
+    const minR = Math.min(...rewards), maxR = Math.max(...rewards), rng = (maxR-minR)||1;
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle='rgba(255,255,255,0.05)'; ctx.lineWidth=1;
+    for(let i=0;i<=4;i++) { const y=H*(i/4); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'rgba(79,142,247,0.3)'); grad.addColorStop(1,'rgba(79,142,247,0.0)');
+    ctx.fillStyle=grad; ctx.beginPath();
+    rewards.forEach((r,i) => { const x=(i/(rewards.length-1))*W, y=H-((r-minR)/rng)*(H-12)-6; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='var(--primary)'; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.beginPath();
+    rewards.forEach((r,i) => { const x=(i/(rewards.length-1))*W, y=H-((r-minR)/rng)*(H-12)-6; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.stroke();
+    const cx=(fracIdx/(rewards.length-1))*W, cy=H-((rewards[fracIdx]-minR)/rng)*(H-12)-6;
+    ctx.fillStyle='var(--warning)'; ctx.beginPath(); ctx.arc(cx,cy,5,0,Math.PI*2); ctx.fill();
+}
+
+// Beam heatmap
+function drawHeatmap(beamData, canvasId) {
+    const canvas = $(canvasId); if(!canvas) return;
+    const ctx = canvas.getContext('2d'), sz = canvas.width, cell = sz/16;
+    if (!beamData || !beamData.length) { ctx.fillStyle='#22263a'; ctx.fillRect(0,0,sz,sz); return; }
+    const flat = beamData.flat(), maxV = Math.max(...flat, 0.001);
+    for(let i=0;i<16;i++) for(let j=0;j<16;j++) {
+        const v=(beamData[i]&&beamData[i][j])||0;
+        ctx.fillStyle=doseColor(v,maxV); ctx.fillRect(j*cell,i*cell,cell,cell);
+    }
+}
+function renderBeams(fraction) {
+    const grid = $('beamGrid'); grid.innerHTML = '';
+    const hm = fraction.beam_heatmap || [];
+    const angles = [0,40,80,120,160,200,240,280,320];
+    for(let b=0;b<Math.min(9,hm.length);b++) {
+        const div = document.createElement('div');
+        div.className='beam-item';
+        div.innerHTML=`<div class="beam-label">Beam ${b+1} · ${angles[b]}°</div><canvas id="bm_${b}" width="128" height="128"></canvas>`;
+        grid.appendChild(div);
+        setTimeout(()=>drawHeatmap(hm[b]||[],`bm_${b}`),20);
+    }
+}
+
+// Main render
+function renderFraction() {
+    if(!simData||!config) return;
+    const f = simData.fractions[fracIdx]; if(!f) return;
+    const total = simData.fractions.length;
+    $('fracNum').textContent   = fracIdx+1;
+    $('fracTotal').textContent = total;
+    $('fracMode').textContent  = simData.mode==='live' ? 'Live Agent · PPO Deterministic' : 'Demo Mode';
+    prevBtn.disabled = fracIdx===0;
+    nextBtn.disabled = fracIdx===total-1;
+    updateFracTrack(fracIdx);
+    $('mReward').textContent = num(f.reward,4);
+    $('mPTV').textContent    = num(f.ptv_reward,4);
+    $('mOAR').textContent    = num(f.oar_penalty,4);
+    $('mAction').textContent = num(f.action_max,3);
+    updateSidebar(f);
+    renderBeams(f);
+    requestAnimationFrame(drawRewardChart);
+}
+
+// Summary
+function renderSummary() {
+    if(!simData||!simData.summary) return;
+    const s = simData.summary;
+    $('summaryPatientLabel').textContent = `Patient ${simData.patient_id} · ${s.n_fractions} fractions delivered`;
+    $('sTotalReward').textContent = num(s.total_reward,3);
+    $('sAvgReward').textContent   = num(s.avg_reward_per_fraction,4);
+    const ptvOk   = Object.values(s.ptv_summary||{}).filter(p=>p.achieved).length;
+    const oarViol = Object.values(s.oar_summary||{}).filter(o=>o.violation).length;
+    $('sPTVok').textContent   = `${ptvOk}/${Object.keys(s.ptv_summary||{}).length}`;
+    $('sOARviol').textContent = `${oarViol}`;
+    $('sOARviol').style.color = oarViol>0 ? 'var(--danger)' : 'var(--success)';
+
+    let ptvHtml='';
+    for(const [ptv,d] of Object.entries(s.ptv_summary||{})) {
+        const col=PTV_COLORS[ptv]||'var(--primary)';
+        ptvHtml+=`<div class="summary-row">
+            <span style="color:${col};font-weight:700">${ptv}</span>
+            <span>${d.final_dose.toFixed(1)} / ${d.prescribed} Gy</span>
+            <span>${d.coverage_pct.toFixed(1)}%</span>
+            <span class="badge ${d.achieved?'badge-success':'badge-warn'}">${d.achieved?'✓ OK':'⚡ Low'}</span>
+        </div>`;
+    }
+    $('summaryPTV').innerHTML = ptvHtml;
+
+    let oarHtml='';
+    for(const [oar,d] of Object.entries(s.oar_summary||{})) {
+        oarHtml+=`<div class="summary-row">
+            <span>${oar}</span>
+            <span>${d.final_dose.toFixed(1)} / ${d.tolerance} Gy</span>
+            <span>${d.pct_of_tolerance.toFixed(0)}%</span>
+            <span class="badge ${d.violation?'badge-danger':'badge-success'}">${d.violation?'❌ Violation':'✓ OK'}</span>
+        </div>`;
+    }
+    $('summaryOAR').innerHTML = oarHtml;
+    showSummary();
+}
+
+// API
+async function loadInitialData() {
+    showLoading('Connecting to backend...','Loading config and patient list');
+    try {
+        const [cfgRes, ptRes] = await Promise.all([fetch(`${API}/config`), fetch(`${API}/patients`)]);
+        if(!cfgRes.ok) throw new Error(`Config: ${cfgRes.status}`);
+        if(!ptRes.ok)  throw new Error(`Patients: ${ptRes.status}`);
+        config = await cfgRes.json();
+        const ptData = await ptRes.json();
+        const pts = ptData.patients || [];
+        patientSelect.innerHTML = pts.map(p=>`<option value="${p}">${p}</option>`).join('');
+        simulateBtn.disabled = pts.length===0;
+        setStatus(true);
+    } catch(e) {
+        setStatus(false);
+        showError(`Backend unreachable: ${e.message}. Is Flask running on port 5000?`);
+    } finally { hideLoading(); }
+}
+
+async function runSimulation() {
+    const patient = patientSelect.value; if(!patient) return;
+    showLoading(`Simulating ${patient}...`, 'Running all 35 fractions through the PPO agent — please wait');
+    simData = null;
+    try {
+        const res = await fetch(`${API}/patients/${patient}/simulate`,{method:'POST'});
+        if(!res.ok) { const b=await res.json().catch(()=>({})); throw new Error(b.error||`HTTP ${res.status}`); }
+        simData = await res.json();
+        if(!simData.fractions||!simData.fractions.length) throw new Error('No fraction data returned');
+        simData.fractions = simData.fractions.map(f=>({
+            fraction:               f.fraction               ?? 0,
+            reward:                 typeof f.reward          ==='number'?f.reward:0,
+            oar_penalty:            typeof f.oar_penalty     ==='number'?f.oar_penalty:0,
+            ptv_reward:             typeof f.ptv_reward      ==='number'?f.ptv_reward:0,
+            action_mean:            typeof f.action_mean     ==='number'?f.action_mean:0,
+            action_max:             typeof f.action_max      ==='number'?f.action_max:0,
+            beam_heatmap:           f.beam_heatmap           ||[],
+            cumulative_organ_doses: f.cumulative_organ_doses ||{},
+        }));
+        fracIdx = 0;
+        buildFracTrack(simData.fractions.length);
+        showSimView();
+        renderFraction();
+    } catch(e) {
+        console.error(e); showError(`Simulation failed: ${e.message}`);
+    } finally { hideLoading(); }
+}
+
+// Events
+randomBtn.addEventListener('click', async()=>{ try { const r=await fetch(`${API}/patients/random`); if(!r.ok) throw new Error(); const d=await r.json(); patientSelect.value=d.patient_id; } catch(e){showError('Could not load random patient');} });
+simulateBtn.addEventListener('click', runSimulation);
+prevBtn.addEventListener('click', ()=>{ if(fracIdx>0){fracIdx--;renderFraction();} });
+nextBtn.addEventListener('click', ()=>{ if(simData&&fracIdx<simData.fractions.length-1){fracIdx++;renderFraction();} });
+summaryBtn.addEventListener('click', renderSummary);
+backToFracBtn.addEventListener('click', ()=>{ showSimView(); renderFraction(); });
+window.addEventListener('resize', ()=>{ if(simData) drawRewardChart(); });
+
+loadInitialData();
+</script>
+</body>
+</html>

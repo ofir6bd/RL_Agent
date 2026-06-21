@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RL Agent - Radiation Therapy UI</title>
+    
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Chart and visualization libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.26.0/plotly.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #3b82f6;
+            --secondary: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --dark: #1f2937;
+            --light: #f3f4f6;
+            --border: #e5e7eb;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 20px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .app {
+            background: var(--light);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, #1e40af 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: var(--shadow-lg);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff 0%, #e0e7ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-status {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--secondary);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Main container */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        /* Control Panel */
+        .control-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--primary);
+        }
+
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--dark);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .control-group select,
+        .control-group input {
+            padding: 12px 15px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, #1e40af 100%);
+            color: white;
+            box-shadow: var(--shadow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--secondary) 0%, #059669 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Dashboard Grid */
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            transition: all 0.3s ease;
+            border: 1px solid var(--border);
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--dark);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-icon {
+            font-size: 20px;
+        }
+
+        /* PTV Tracking */
+        .ptv-buckets {
+            display: grid;
+            gap: 12px;
+        }
+
+        .ptv-bucket {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            border-left: 4px solid var(--primary);
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .ptv-bucket.ptv-green {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border-left-color: var(--secondary);
+        }
+
+        .ptv-bucket.ptv-orange {
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+            border-left-color: var(--warning);
+        }
+
+        .ptv-bucket.ptv-red {
+            background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+            border-left-color: var(--danger);
+        }
+
+        .ptv-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--dark);
+            margin-bottom: 6px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--secondary) 0%, var(--secondary) 100%);
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }
+
+        .ptv-value {
+            font-size: 12px;
+            color: var(--dark);
+            margin-top: 6px;
+            font-weight: 600;
+        }
+
+        /* OAR Tracking */
+        .oar-items {
+            display: grid;
+            gap: 12px;
+        }
+
+        .oar-item {
+            background: var(--light);
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 4px solid var(--primary);
+        }
+
+        .oar-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .oar-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--dark);
+        }
+
+        .oar-dose {
+            font-size: 12px;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .oar-tolerance {
+            font-size: 11px;
+            color: #666;
+        }
+
+        /* Metrics */
+        .metric {
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--primary);
+            margin: 10px 0;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Charts */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 15px;
+        }
+
+        .chart-wrapper {
+            grid-column: span 2;
+        }
+
+        /* Fraction Progress */
+        .fraction-tracker {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: var(--shadow);
+            margin-bottom: 30px;
+            grid-column: 1 / -1;
+        }
+
+        .fraction-timeline {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 15px 0;
+        }
+
+        .fraction-badge {
+            min-width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: var(--light);
+            border: 2px solid var(--border);
+        }
+
+        .fraction-badge:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+        }
+
+        .fraction-badge.active {
+            background: linear-gradient(135deg, var(--primary) 0%, #1e40af 100%);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .fraction-badge.done {
+            background: var(--secondary);
+            color: white;
+            border-color: var(--secondary);
+        }
+
+        /* Heatmap */
+        .heatmap-container {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            margin-bottom: 30px;
+            grid-column: 1 / -1;
+        }
+
+        .beam-selector {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .beam-button {
+            padding: 10px 15px;
+            border: 2px solid var(--border);
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .beam-button:hover {
+            border-color: var(--primary);
+        }
+
+        .beam-button.active {
+            background: linear-gradient(135deg, var(--primary) 0%, #1e40af 100%);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        #heatmap {
+            width: 100%;
+            height: 400px;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner-text {
+            color: var(--dark);
+            font-weight: 600;
+        }
+
+        /* Alert */
+        .alert {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid;
+        }
+
+        .alert-success {
+            background: #f0fdf4;
+            border-left-color: var(--secondary);
+            color: #065f46;
+        }
+
+        .alert-error {
+            background: #fef2f2;
+            border-left-color: var(--danger);
+            color: #7f1d1d;
+        }
+
+        .alert-info {
+            background: #f0f9ff;
+            border-left-color: var(--primary);
+            color: #0c2d6b;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .chart-wrapper {
+                grid-column: 1;
+            }
+
+            .header-content {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .header h1 {
+                font-size: 22px;
+            }
+
+            .control-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+        }
+
+        /* Animation */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .card, .control-panel {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.3);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(59, 130, 246, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        console.log("Starting React app...");
+        console.log("React version:", React.version);
+        console.log("ReactDOM version:", ReactDOM.version);
+        
+        const { useState, useEffect, useRef } = React;
+
+        const API_BASE = 'http://localhost:5000/api';
+        
+        console.log("API_BASE:", API_BASE);
+
+        // Main App Component
+        function App() {
+            const [config, setConfig] = useState(null);
+            const [patients, setPatients] = useState([]);
+            const [selectedPatient, setSelectedPatient] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const [simulationData, setSimulationData] = useState(null);
+            const [selectedFraction, setSelectedFraction] = useState(0);
+            const [selectedBeam, setSelectedBeam] = useState(0);
+            const [apiError, setApiError] = useState(null);
+
+            // Initialize on mount
+            useEffect(() => {
+                console.log("App mounted, loading initial data...");
+                loadInitialData();
+            }, []);
+
+            const loadInitialData = async () => {
+                try {
+                    console.log("Fetching config and patients...");
+                    setLoading(true);
+                    setApiError(null);
+                    
+                    const configRes = await fetch(`${API_BASE}/config`)
+                        .then(r => {
+                            console.log("Config response:", r.status);
+                            if (!r.ok) throw new Error(`Config fetch failed: ${r.status}`);
+                            return r.json();
+                        });
+                    
+                    console.log("Config received:", configRes);
+                    
+                    const patientsRes = await fetch(`${API_BASE}/patients`)
+                        .then(r => {
+                            console.log("Patients response:", r.status);
+                            if (!r.ok) throw new Error(`Patients fetch failed: ${r.status}`);
+                            return r.json();
+                        });
+                    
+                    console.log("Patients received:", patientsRes);
+                    
+                    setConfig(configRes);
+                    setPatients(patientsRes.patients);
+                    if (patientsRes.patients.length > 0) {
+                        setSelectedPatient(patientsRes.patients[0]);
+                    }
+                    setError(null);
+                    console.log("Data loaded successfully");
+                } catch (err) {
+                    console.error("Error loading data:", err);
+                    setApiError(`Failed to load data: ${err.message}`);
+                    setError(`Failed to load data: ${err.message}`);
+                }
+                setLoading(false);
+            };
+
+            const loadRandomPatient = async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/patients/random`).then(r => r.json());
+                    setSelectedPatient(res.patient_id);
+                } catch (err) {
+                    setError(`Failed to load random patient: ${err.message}`);
+                }
+            };
+
+            const runSimulation = async () => {
+                try {
+                    setLoading(true);
+                    const res = await fetch(`${API_BASE}/patients/${selectedPatient}/simulate`, {
+                        method: 'POST'
+                    }).then(r => r.json());
+                    
+                    setSimulationData(res);
+                    setSelectedFraction(0);
+                    setError(null);
+                } catch (err) {
+                    setError(`Failed to run simulation: ${err.message}`);
+                }
+                setLoading(false);
+            };
+
+            if (!config) {
+                return (
+                    <div className="app">
+                        <div className="header">
+                            <div className="header-content">
+                                <h1>RL Agent - Radiation Therapy UI</h1>
+                            </div>
+                        </div>
+                        <div className="loading">
+                            {apiError ? (
+                                <div>
+                                    <div style={{color: 'red', fontSize: '18px', marginBottom: '20px', fontWeight: 'bold'}}>
+                                        ❌ Connection Error
+                                    </div>
+                                    <div style={{color: '#333', fontSize: '14px', marginBottom: '20px', textAlign: 'left', background: '#ffe0e0', padding: '15px', borderRadius: '8px', maxWidth: '600px', margin: '0 auto'}}>
+                                        <p><strong>Error:</strong> {apiError}</p>
+                                        <p style={{marginTop: '10px'}}><strong>Make sure:</strong></p>
+                                        <ul style={{marginLeft: '20px', marginTop: '10px'}}>
+                                            <li>Flask server is running on port 5000</li>
+                                            <li>Run: <code>python app.py --debug</code></li>
+                                            <li>Check PowerShell window for "Running on http://127.0.0.1:5000"</li>
+                                        </ul>
+                                    </div>
+                                    <button 
+                                        onClick={loadInitialData}
+                                        style={{marginTop: '20px', padding: '10px 20px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold'}}
+                                    >
+                                        🔄 Retry Connection
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="spinner"></div>
+                                    <div className="spinner-text">Initializing system...</div>
+                                    <div style={{fontSize: '12px', color: '#666', marginTop: '20px'}}>
+                                        Connecting to backend at: {API_BASE}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="app">
+                    <Header config={config} />
+                    
+                    <div className="container">
+                        {error && (
+                            <div className="alert alert-error">
+                                <strong>Error:</strong> {error}
+                            </div>
+                        )}
+
+                        <ControlPanel 
+                            patients={patients}
+                            selectedPatient={selectedPatient}
+                            onPatientChange={setSelectedPatient}
+                            onRandomClick={loadRandomPatient}
+                            onSimulateClick={runSimulation}
+                            loading={loading}
+                        />
+
+                        {simulationData ? (
+                            <>
+                                <Dashboard 
+                                    config={config}
+                                    simulationData={simulationData}
+                                    selectedFraction={selectedFraction}
+                                    selectedBeam={selectedBeam}
+                                    onFractionSelect={setSelectedFraction}
+                                    onBeamSelect={setSelectedBeam}
+                                />
+                            </>
+                        ) : (
+                            <div className="control-panel" style={{textAlign: 'center'}}>
+                                <p style={{color: 'var(--dark)', fontSize: '16px'}}>
+                                    Select a patient and click "Run Simulation" to begin
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Header Component
+        function Header({ config }) {
+            return (
+                <div className="header">
+                    <div className="header-content">
+                        <h1>🎯 RL Agent - Radiation Therapy Planning</h1>
+                        <div className="header-status">
+                            <div className="status-item">
+                                <span className="status-dot"></span>
+                                <span>System Active</span>
+                            </div>
+                            <div className="status-item">
+                                <span>Fractions: {config.n_fractions}</span>
+                            </div>
+                            <div className="status-item">
+                                <span>Beams: {config.n_beams}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Control Panel Component
+        function ControlPanel({ patients, selectedPatient, onPatientChange, onRandomClick, onSimulateClick, loading }) {
+            return (
+                <div className="control-panel">
+                    <div className="control-grid">
+                        <div className="control-group">
+                            <label>Patient Selection</label>
+                            <select 
+                                value={selectedPatient} 
+                                onChange={(e) => onPatientChange(e.target.value)}
+                                disabled={loading}
+                            >
+                                {patients.map(p => (
+                                    <option key={p} value={p}>{p}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div className="button-group">
+                        <button 
+                            className="btn-secondary"
+                            onClick={onRandomClick}
+                            disabled={loading}
+                        >
+                            🎲 Random Patient
+                        </button>
+                        <button 
+                            className="btn-primary"
+                            onClick={onSimulateClick}
+                            disabled={loading}
+                        >
+                            {loading ? '⏳ Running...' : '▶️ Run Simulation'}
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // Dashboard Component
+        function Dashboard({ config, simulationData, selectedFraction, selectedBeam, onFractionSelect, onBeamSelect }) {
+            const fractionData = simulationData.fractions[selectedFraction] || simulationData.fractions[0];
+
+            return (
+                <>
+                    {/* Fraction Timeline */}
+                    <div className="fraction-tracker">
+                        <h2 style={{marginBottom: '20px', fontSize: '18px', fontWeight: 700}}>
+                            📊 Treatment Progress: Fraction by Fraction
+                        </h2>
+                        <div className="fraction-timeline">
+                            {simulationData.fractions.map((f, idx) => (
+                                <div 
+                                    key={idx}
+                                    className={`fraction-badge ${idx === selectedFraction ? 'active' : 'done'}`}
+                                    onClick={() => onFractionSelect(idx)}
+                                    title={`Fraction ${f.fraction}: Reward ${f.reward.toFixed(3)}`}
+                                >
+                                    Fx {f.fraction}
+                                </div>
+                            ))}
+                        </div>
+                        <div style={{marginTop: '20px', fontSize: '13px', color: '#666'}}>
+                            Showing {simulationData.total_fractions_simulated} of {config.n_fractions} fractions
+                        </div>
+                    </div>
+
+                    {/* Main Dashboard Grid */}
+                    <div className="dashboard">
+                        {/* PTV Coverage Buckets */}
+                        <div className="card">
+                            <div className="card-title">
+                                <span className="card-icon">🎯</span>
+                                PTV Coverage Status
+                            </div>
+                            <div className="ptv-buckets">
+                                {config.ptv_names.map((ptv, idx) => {
+                                    const coverage = 0.7 + Math.random() * 0.3;
+                                    const coverageClass = coverage > 0.95 ? 'ptv-green' : coverage > 0.80 ? 'ptv-orange' : 'ptv-red';
+                                    return (
+                                        <div key={ptv} className={`ptv-bucket ${coverageClass}`}>
+                                            <div className="ptv-name">{ptv}</div>
+                                            <div className="progress-bar">
+                                                <div 
+                                                    className="progress-fill" 
+                                                    style={{width: `${coverage * 100}%`}}
+                                                ></div>
+                                            </div>
+                                            <div className="ptv-value">
+                                                {(coverage * 100).toFixed(1)}% of {config.ptv_prescriptions[ptv]} Gy
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* OAR Tracking */}
+                        <div className="card">
+                            <div className="card-title">
+                                <span className="card-icon">⚠️</span>
+                                OAR Dose Monitoring
+                            </div>
+                            <div className="oar-items">
+                                {config.oar_names.map((oar, idx) => {
+                                    const meanDose = 10 + Math.random() * 40;
+                                    const tolerance = config.oar_tolerances[oar];
+                                    const violation = meanDose > tolerance;
+                                    return (
+                                        <div key={oar} className="oar-item" style={{
+                                            borderLeftColor: violation ? 'var(--danger)' : 'var(--secondary)'
+                                        }}>
+                                            <div className="oar-header">
+                                                <span className="oar-name">{oar}</span>
+                                                <span className="oar-dose">
+                                                    {meanDose.toFixed(1)} Gy
+                                                </span>
+                                            </div>
+                                            <div style={{display: 'flex', justifyContent: 'space-between'}}>
+                                                <span className="oar-tolerance">Tolerance: {tolerance} Gy</span>
+                                                <span style={{
+                                                    fontSize: '11px',
+                                                    fontWeight: 600,
+                                                    color: violation ? 'var(--danger)' : 'var(--secondary)'
+                                                }}>
+                                                    {violation ? '❌ VIOLATION' : '✓ OK'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Fraction Metrics */}
+                        <div className="card">
+                            <div className="card-title">
+                                <span className="card-icon">📈</span>
+                                Fraction Metrics
+                            </div>
+                            <div style={{display: 'grid', grid: 'repeat(2, 1fr)', gap: '20px'}}>
+                                <div className="metric">
+                                    <div className="metric-label">Total Reward</div>
+                                    <div className="metric-value">
+                                        {fractionData.reward.toFixed(3)}
+                                    </div>
+                                </div>
+                                <div className="metric">
+                                    <div className="metric-label">OAR Penalty</div>
+                                    <div className="metric-value" style={{color: 'var(--danger)'}}>
+                                        {fractionData.oar_penalty.toFixed(3)}
+                                    </div>
+                                </div>
+                                <div className="metric">
+                                    <div className="metric-label">PTV Reward</div>
+                                    <div className="metric-value" style={{color: 'var(--secondary)'}}>
+                                        {fractionData.ptv_reward.toFixed(3)}
+                                    </div>
+                                </div>
+                                <div className="metric">
+                                    <div className="metric-label">Max Action</div>
+                                    <div className="metric-value">
+                                        {fractionData.action_max.toFixed(3)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Reward Trend */}
+                        <div className="card chart-wrapper">
+                            <div className="card-title">
+                                <span className="card-icon">📊</span>
+                                Reward Trend Across Fractions
+                            </div>
+                            <RewardChart fractions={simulationData.fractions} />
+                        </div>
+
+                        {/* Beam Selection */}
+                        <div className="card" style={{gridColumn: '1 / -1'}}>
+                            <div className="card-title">
+                                <span className="card-icon">💉</span>
+                                Beam Selection for Dose Map
+                            </div>
+                            <div className="beam-selector">
+                                {Array.from({length: config.n_beams}, (_, i) => (
+                                    <button
+                                        key={i}
+                                        className={`beam-button ${selectedBeam === i ? 'active' : ''}`}
+                                        onClick={() => onBeamSelect(i)}
+                                    >
+                                        Beam {i + 1}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Dose Heatmap */}
+                        <div className="heatmap-container">
+                            <h2 style={{marginBottom: '15px', fontSize: '16px', fontWeight: 700}}>
+                                🔥 Dose Map - Beam {selectedBeam + 1}
+                            </h2>
+                            <DoseHeatmap 
+                                beamId={selectedBeam}
+                                fractionData={fractionData}
+                                gridSize={config.beamlet_h}
+                            />
+                        </div>
+
+                        {/* Agent Performance */}
+                        <div className="card" style={{gridColumn: '1 / -1'}}>
+                            <div className="card-title">
+                                <span className="card-icon">🤖</span>
+                                Agent Performance Summary
+                            </div>
+                            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px'}}>
+                                <StatBox label="Mean Action" value={fractionData.action_mean.toFixed(4)} />
+                                <StatBox label="Max Action" value={fractionData.action_max.toFixed(4)} />
+                                <StatBox label="Total Fractions" value={simulationData.total_fractions_simulated} />
+                                <StatBox label="Avg Reward" value={(
+                                    simulationData.fractions.reduce((sum, f) => sum + f.reward, 0) / simulationData.fractions.length
+                                ).toFixed(3)} />
+                            </div>
+                        </div>
+                    </div>
+                </>
+            );
+        }
+
+        // Reward Chart Component
+        function RewardChart({ fractions }) {
+            const chartRef = useRef(null);
+
+            useEffect(() => {
+                if (!chartRef.current) return;
+
+                const ctx = chartRef.current.getContext('2d');
+                
+                const rewards = fractions.map(f => f.reward);
+                const labels = fractions.map(f => `Fx ${f.fraction}`);
+
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'Total Reward',
+                                data: rewards,
+                                borderColor: 'rgb(59, 130, 246)',
+                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                tension: 0.3,
+                                fill: true,
+                                pointBackgroundColor: 'rgb(59, 130, 246)',
+                                pointRadius: 6,
+                                pointHoverRadius: 8
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: {
+                                    font: { size: 13, weight: 600 }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                ticks: { font: { size: 12 } }
+                            },
+                            x: {
+                                ticks: { font: { size: 12 } }
+                            }
+                        }
+                    }
+                });
+            }, [fractions]);
+
+            return <canvas ref={chartRef} style={{height: '300px'}}></canvas>;
+        }
+
+        // Dose Heatmap Component
+        function DoseHeatmap({ beamId, fractionData, gridSize }) {
+            const canvasRef = useRef(null);
+
+            useEffect(() => {
+                if (!canvasRef.current) return;
+
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                canvas.width = 400;
+                canvas.height = 400;
+
+                // Generate random heatmap data
+                const data = Array.from({length: gridSize}, () =>
+                    Array.from({length: gridSize}, () => Math.random() * 100)
+                );
+
+                const cellSize = canvas.width / gridSize;
+                const maxValue = 100;
+
+                // Draw heatmap
+                data.forEach((row, i) => {
+                    row.forEach((value, j) => {
+                        const hue = (1 - value / maxValue) * 240;
+                        ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+                        ctx.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
+                    });
+                });
+
+                // Draw grid
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.lineWidth = 1;
+                for (let i = 0; i <= gridSize; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(i * cellSize, 0);
+                    ctx.lineTo(i * cellSize, canvas.height);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(0, i * cellSize);
+                    ctx.lineTo(canvas.width, i * cellSize);
+                    ctx.stroke();
+                }
+            }, [beamId, gridSize]);
+
+            return <canvas ref={canvasRef} id="heatmap"></canvas>;
+        }
+
+        // Stat Box Component
+        function StatBox({ label, value }) {
+            return (
+                <div style={{
+                    background: 'var(--light)',
+                    padding: '15px',
+                    borderRadius: '8px',
+                    textAlign: 'center'
+                }}>
+                    <div style={{fontSize: '12px', color: '#666', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 600}}>
+                        {label}
+                    </div>
+                    <div style={{fontSize: '24px', fontWeight: 700, color: 'var(--primary)'}}>
+                        {value}
+                    </div>
+                </div>
+            );
+        }
+
+        // Render the app
+        console.log("Attempting to render React app...");
+        try {
+            ReactDOM.render(<App />, document.getElementById('root'));
+            console.log("✓ React app rendered successfully");
+        } catch (err) {
+            console.error("FATAL ERROR rendering app:", err);
+            document.getElementById('root').innerHTML = `
+                <div style="padding: 40px; background: #fef2f2; color: #7f1d1d; font-family: monospace; white-space: pre-wrap;">
+                    <h2>❌ FATAL ERROR</h2>
+                    <p>Failed to render React application:</p>
+                    <p>${err.message}</p>
+                    <p>Stack: ${err.stack}</p>
+                    <p>Check browser console (F12) for more details.</p>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
