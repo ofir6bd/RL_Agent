@@ -3,6 +3,29 @@
 Reinforcement-learning agent for fractionated radiotherapy planning on the
 OpenKBP dataset. The pipeline mirrors the diagram in `rl_pipeline2.html`.
 
+## Formulation (important)
+
+Each fraction is modelled as its own **1-step PPO episode**
+(`DoseEnv.step` always returns `done=True`). Formally this is a
+**contextual bandit**, not a multi-step MDP:
+
+- The GAE recursion collapses to `advantage = reward - value` and
+  `return = reward`, so **`gamma` and `gae_lambda` are inert** — they are
+  kept in the config for schema compatibility only and tuning them has **no
+  effect**. (See `PPO._one_step_advantage`.)
+- Cross-fraction strategy is therefore carried entirely by **(a)** the
+  shaped reward — an adaptive per-fraction PTV target
+  `max(prescription - cumulative_dose, 0) / fractions_remaining` and a
+  per-fraction OAR tolerance `tolerance / n_fractions` — and **(b)** the
+  Markov state (`cumulative_dose`, `fraction_index/35`, and the per-voxel
+  dose-gap channel). There is no learned temporal credit assignment.
+
+This is a deliberate choice: the dose model is linear and deterministic
+with no inter-fraction dynamics, so the problem is separable and a bandit
+framing is both correct and more sample-efficient. If biological/adaptive
+effects are ever added, switch `DoseEnv` to a per-patient (35-step)
+horizon (`done = patient_done`) and re-enable real GAE.
+
 ## Layout
 
 ```

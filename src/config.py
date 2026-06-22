@@ -62,8 +62,14 @@ class Config:
     # the remaining PTV gap (see reward.fractional_ptv_reward).
     lambda_ptv: float = 1.0
 
-    gamma: float = 0.995
-    gae_lambda: float = 0.95
+    # NOTE: gamma / gae_lambda are INERT by design. Each fraction is a
+    # 1-step PPO episode (DoseEnv.step always returns done=True), so this is
+    # a contextual bandit: the GAE recursion collapses to
+    # advantage = reward - value and return = reward, independent of these
+    # two values. Kept only for config-schema compatibility -- do not expect
+    # tuning them to change anything. See PPO._one_step_advantage.
+    gamma: float = 0.995        # inert under 1-step episodes
+    gae_lambda: float = 0.95    # inert under 1-step episodes
     clip_eps: float = 0.2
     ent_coef: float = 0.01
     vf_coef: float = 0.5

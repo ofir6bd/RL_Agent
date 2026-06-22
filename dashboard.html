@@ -106,6 +106,8 @@
         .badge-success { background:rgba(34,197,94,.15); color:var(--success); }
         .badge-danger  { background:rgba(239,68,68,.15); color:var(--danger); }
         .badge-warn    { background:rgba(245,158,11,.15); color:var(--warning); }
+        .badge-muted   { background:rgba(136,146,176,.15); color:var(--muted); }
+        .ptv-card.missing, .oar-row.missing, .summary-row.missing { opacity:.6; }
         #loading-overlay { display:none; position:fixed; inset:0; background:rgba(15,17,23,.85); z-index:200; align-items:center; justify-content:center; flex-direction:column; gap:16px; }
         #loading-overlay.show { display:flex; }
         .spinner { width:48px; height:48px; border:3px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin .9s linear infinite; }
@@ -268,6 +270,13 @@ function showWelcome()  { $('welcomeView').style.display='flex';  $('simView').s
 function showSimView()  { $('welcomeView').style.display='none';  $('simView').style.display='flex';  $('summaryView').style.display='none'; }
 function showSummary()  { $('welcomeView').style.display='none';  $('simView').style.display='none';  $('summaryView').style.display='flex'; }
 
+// Structures not contoured for the current patient (from the backend).
+function isMissing(name) {
+    const st = simData && simData.structures;
+    if (!st) return false;
+    return (st.ptv_missing || []).includes(name) || (st.oar_missing || []).includes(name);
+}
+
 // Sidebar
 function updateSidebar(fraction) {
     const organs = fraction.cumulative_organ_doses || {};
@@ -276,9 +285,16 @@ function updateSidebar(fraction) {
 
     let ptvHtml = '';
     for (const ptv of (config.ptv_names || [])) {
+        const col = PTV_COLORS[ptv] || 'var(--primary)';
+        if (isMissing(ptv)) {
+            ptvHtml += `<div class="ptv-card missing">
+                <div class="ptv-head"><span class="ptv-name" style="color:var(--muted)">${ptv}</span><span class="ptv-dose">— not contoured</span></div>
+                <div class="ptv-meta"><span>Not contoured for this patient</span><span class="badge badge-muted">N/A</span></div>
+            </div>`;
+            continue;
+        }
         const dose = organs[ptv] || 0, rx = presc[ptv] || 70;
         const pct  = Math.min((dose/rx)*100, 100);
-        const col  = PTV_COLORS[ptv] || 'var(--primary)';
         const ok   = pct >= 95;
         ptvHtml += `<div class="ptv-card">
             <div class="ptv-head"><span class="ptv-name" style="color:${col}">${ptv}</span><span class="ptv-dose">${dose.toFixed(1)} / ${rx} Gy</span></div>
@@ -290,11 +306,21 @@ function updateSidebar(fraction) {
 
     let oarHtml = '';
     for (const oar of (config.oar_names || [])) {
+        const icon = OAR_ICONS[oar] || '🫀';
+        if (isMissing(oar)) {
+            oarHtml += `<div class="oar-row missing">
+                <div class="oar-icon">${icon}</div>
+                <div class="oar-info"><div class="oar-name">${oar}</div>
+                    <div style="font-size:11px;color:var(--muted)">Not contoured for this patient</div>
+                </div>
+                <div class="oar-value"><span class="badge badge-muted">N/A</span></div>
+            </div>`;
+            continue;
+        }
         const dose = organs[oar] || 0, tol = tols[oar] || 60;
         const pct  = Math.min((dose/tol)*100, 100);
         const viol = dose > tol;
         const col  = viol ? 'var(--danger)' : pct > 80 ? 'var(--warning)' : 'var(--success)';
-        const icon = OAR_ICONS[oar] || '🫀';
         oarHtml += `<div class="oar-row ${viol?'violation':''}">
             <div class="oar-icon">${icon}</div>
             <div class="oar-info"><div class="oar-name">${oar}</div>
@@ -396,15 +422,25 @@ function renderSummary() {
     $('summaryPatientLabel').textContent = `Patient ${simData.patient_id} · ${s.n_fractions} fractions delivered`;
     $('sTotalReward').textContent = num(s.total_reward,3);
     $('sAvgReward').textContent   = num(s.avg_reward_per_fraction,4);
-    const ptvOk   = Object.values(s.ptv_summary||{}).filter(p=>p.achieved).length;
+    const presentPtv = Object.values(s.ptv_summary||{}).filter(p=>p.present!==false);
+    const ptvOk   = presentPtv.filter(p=>p.achieved).length;
     const oarViol = Object.values(s.oar_summary||{}).filter(o=>o.violation).length;
-    $('sPTVok').textContent   = `${ptvOk}/${Object.keys(s.ptv_summary||{}).length}`;
+    $('sPTVok').textContent   = `${ptvOk}/${presentPtv.length}`;
     $('sOARviol').textContent = `${oarViol}`;
     $('sOARviol').style.color = oarViol>0 ? 'var(--danger)' : 'var(--success)';
 
     let ptvHtml='';
     for(const [ptv,d] of Object.entries(s.ptv_summary||{})) {
         const col=PTV_COLORS[ptv]||'var(--primary)';
+        if(d.present===false) {
+            ptvHtml+=`<div class="summary-row missing">
+                <span style="color:var(--muted);font-weight:700">${ptv}</span>
+                <span style="color:var(--muted)">— / ${d.prescribed} Gy</span>
+                <span style="color:var(--muted)">N/A</span>
+                <span class="badge badge-muted">Not contoured</span>
+            </div>`;
+            continue;
+        }
         ptvHtml+=`<div class="summary-row">
             <span style="color:${col};font-weight:700">${ptv}</span>
             <span>${d.final_dose.toFixed(1)} / ${d.prescribed} Gy</span>
@@ -416,6 +452,15 @@ function renderSummary() {
 
     let oarHtml='';
     for(const [oar,d] of Object.entries(s.oar_summary||{})) {
+        if(d.present===false) {
+            oarHtml+=`<div class="summary-row missing">
+                <span style="color:var(--muted)">${oar}</span>
+                <span style="color:var(--muted)">— / ${d.tolerance} Gy</span>
+                <span style="color:var(--muted)">N/A</span>
+                <span class="badge badge-muted">Not contoured</span>
+            </div>`;
+            continue;
+        }
         oarHtml+=`<div class="summary-row">
             <span>${oar}</span>
             <span>${d.final_dose.toFixed(1)} / ${d.tolerance} Gy</span>

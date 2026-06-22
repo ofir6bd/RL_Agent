@@ -66,8 +66,22 @@ lambda_ptv:           3.5
 # DVH score degraded sharply afterwards (25 -> 33), i.e. PPO was overshooting
 # off the warm-start. Halve LR to stabilise. ent_coef/ppo_epochs kept from
 # Tier-3.
-gamma:           0.995
-gae_lambda:      0.95
+#
+# NOTE ON EPISODE HORIZON: each fraction is its own 1-step PPO episode
+# (DoseEnv.step always returns done=True), so this is effectively a
+# CONTEXTUAL BANDIT, not a multi-step MDP. Cross-fraction strategy is
+# carried entirely by the shaped reward (adaptive PTV target +
+# per-fraction OAR tolerance) and the Markov state (cumulative_dose,
+# fraction_index, dose-gap channels) -- NOT by temporal bootstrapping.
+#
+# >>> gamma and gae_lambda below are INERT by design. <<<
+# With done=True on every step the GAE recursion collapses to
+# advantage = reward - value and return = reward, so neither value has
+# any effect on training. They are kept only to satisfy the PPO config
+# schema; DO NOT sweep/tune them expecting a result. See src/agents/ppo.py
+# (_one_step_advantage) and the "Formulation" note in README.md.
+gamma:           0.995        # inert (1-step episodes) -- see note above
+gae_lambda:      0.95         # inert (1-step episodes) -- see note above
 clip_eps:        0.2
 ent_coef:        0.005
 vf_coef:         0.5
