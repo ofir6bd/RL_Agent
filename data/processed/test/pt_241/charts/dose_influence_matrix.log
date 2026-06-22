@@ -1,6 +1,6 @@
 # Dose-influence-matrix diagnostics — patient pt_241
-# generated: 2026-06-19 22:14:07
-# elapsed:   47.5 s
+# generated: 2026-06-22 10:04:52
+# elapsed:   46.4 s
 
 [setup]
 native CT shape (z,y,x) = (99, 128, 128)

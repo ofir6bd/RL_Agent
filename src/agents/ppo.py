@@ -1,4 +1,12 @@
-"""Minimal single-environment PPO with GAE."""
+"""Minimal single-environment PPO for 1-step (bandit) episodes.
+
+Each fraction is its own PPO episode (``DoseEnv.step`` always returns
+``done=True``), so this is effectively a contextual bandit rather than a
+multi-step MDP. Advantage reduces to ``reward - value`` and the return to
+``reward``; ``cfg.gamma`` / ``cfg.gae_lambda`` are inert by design (see
+``_one_step_advantage``). Cross-fraction strategy is carried by the shaped
+reward and the Markov state, not by temporal bootstrapping.
+"""
 from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
@@ -66,18 +74,32 @@ class PPO:
                 float(log_probability.item()),
                 float(state_value.item()))
 
-    # ------------------------------------------------------------ GAE
-    def _generalised_advantage_estimation(self,
-                                          rewards: torch.Tensor,
-                                          values: torch.Tensor,
-                                          dones: torch.Tensor,
-                                          last_value: float):
-        """Compute GAE advantages and discounted returns.
+    # ------------------------------------------------------ advantage (1-step)
+    def _one_step_advantage(self,
+                            rewards: torch.Tensor,
+                            values: torch.Tensor,
+                            dones: torch.Tensor,
+                            last_value: float):
+        """Compute advantages and returns for 1-step (bandit) episodes.
 
-        With every transition flagged ``done = True`` (1-step episodes) the
-        ``next_non_terminal`` mask is zero everywhere, so the geometric sum
-        collapses to ``advantage = reward - value`` and ``return = reward``.
+        Each fraction is its own PPO episode (``done = True`` everywhere), so
+        this is a contextual bandit, not a multi-step MDP. The general GAE
+        recursion is kept below for clarity, but with ``next_non_terminal``
+        zero everywhere it collapses exactly to::
+
+            advantage = reward - value
+            return    = reward
+
+        which means ``cfg.gamma`` and ``cfg.gae_lambda`` are INERT here: they
+        multiply zeroed terms and have no effect on training. Do not expect
+        sweeping them to change results. The assert documents this contract.
         """
+        assert bool(dones.all()), (
+            "PPO._one_step_advantage assumes 1-step (bandit) episodes with "
+            "done=True on every transition; got a non-terminal transition. "
+            "If you switch DoseEnv to a multi-step (per-patient) horizon, "
+            "rename this back to a true GAE and re-enable gamma/gae_lambda."
+        )
         n_steps = rewards.shape[0]
         advantages = torch.zeros(n_steps, dtype=torch.float32)
         last_gae_advantage = 0.0
@@ -106,7 +128,7 @@ class PPO:
         rewards = torch.clamp(rollout.rewards, min=-50.0, max=50.0)
         values  = torch.clamp(rollout.values,  min=-50.0, max=50.0)
 
-        advantages, returns = self._generalised_advantage_estimation(
+        advantages, returns = self._one_step_advantage(
             rewards, values, rollout.dones, last_value,
         )
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
