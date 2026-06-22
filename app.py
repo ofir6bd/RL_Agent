@@ -211,8 +211,48 @@ def get_patient_evaluation(patient_id):
         return jsonify({'error': str(e)}), 400
 
 
-def _build_summary(fraction_data, prescriptions, tolerances):
-    """Build end-of-treatment summary from all fraction data."""
+def _present_structure_names():
+    """Canonical structures that are actually contoured for the *current*
+    ENV patient (mask exists and is non-empty).
+
+    Returns ``None`` when the env / masks are unavailable (e.g. demo mode),
+    in which case callers should treat every structure as present.
+    """
+    if ENV is None or not MODELS_AVAILABLE:
+        return None
+    try:
+        masks = ENV._structure_masks()
+    except Exception as e:
+        print(f"Could not determine present structures: {e}")
+        return None
+    return {name for name, mask in masks.items() if np.any(mask)}
+
+
+def _structures_payload(present_structures, ptv_names, oar_names):
+    """Split the canonical structure lists into present / missing for the UI."""
+    if present_structures is None:
+        return {
+            'ptv_present': list(ptv_names), 'ptv_missing': [],
+            'oar_present': list(oar_names), 'oar_missing': [],
+        }
+    return {
+        'ptv_present': [p for p in ptv_names if p in present_structures],
+        'ptv_missing': [p for p in ptv_names if p not in present_structures],
+        'oar_present': [o for o in oar_names if o in present_structures],
+        'oar_missing': [o for o in oar_names if o not in present_structures],
+    }
+
+
+def _build_summary(fraction_data, prescriptions, tolerances,
+                   present_structures=None):
+    """Build end-of-treatment summary from all fraction data.
+
+    ``present_structures`` is the set of structures actually contoured for
+    this patient (``None`` => assume all present, e.g. demo mode). Missing
+    structures are flagged with ``present: False`` and carry no dose /
+    coverage / violation numbers so the UI can distinguish "not contoured"
+    from "contoured but received 0 Gy".
+    """
     if not fraction_data:
         return {}
     last = fraction_data[-1]
@@ -220,25 +260,33 @@ def _build_summary(fraction_data, prescriptions, tolerances):
     total_reward = sum(f.get('reward', 0) for f in fraction_data)
     avg_reward = total_reward / len(fraction_data)
 
+    def _is_present(name):
+        return present_structures is None or name in present_structures
+
     ptv_summary = {}
     for ptv, rx in prescriptions.items():
+        present = _is_present(ptv)
         dose = final_doses.get(ptv, 0)
         coverage_pct = min((dose / rx) * 100, 100) if rx > 0 else 0
         ptv_summary[ptv] = {
-            'final_dose': round(dose, 2),
+            'present': present,
+            'final_dose': round(dose, 2) if present else None,
             'prescribed': rx,
-            'coverage_pct': round(coverage_pct, 1),
-            'achieved': coverage_pct >= 95.0,
+            'coverage_pct': round(coverage_pct, 1) if present else None,
+            'achieved': bool(present and coverage_pct >= 95.0),
         }
 
     oar_summary = {}
     for oar, tol in tolerances.items():
+        present = _is_present(oar)
         dose = final_doses.get(oar, 0)
-        violation = dose > tol
+        violation = bool(present and dose > tol)
         oar_summary[oar] = {
-            'final_dose': round(dose, 2),
+            'present': present,
+            'final_dose': round(dose, 2) if present else None,
             'tolerance': tol,
-            'pct_of_tolerance': round((dose / tol) * 100, 1) if tol > 0 else 0,
+            'pct_of_tolerance': (round((dose / tol) * 100, 1) if tol > 0 else 0)
+                                if present else None,
             'violation': violation,
         }
 
@@ -294,12 +342,19 @@ def simulate_patient(patient_id):
                     'beam_heatmap': beam_heatmap,
                     'cumulative_organ_doses': {k: round(v, 2) for k, v in cumulative.items()},
                 })
-            summary = _build_summary(fraction_data, prescriptions, tolerances)
+            # Demo mode: all structures are synthetic and therefore present.
+            present_structures = None
+            summary = _build_summary(fraction_data, prescriptions, tolerances,
+                                     present_structures)
             return jsonify({
                 'patient_id': patient_id,
                 'fractions': fraction_data,
                 'total_fractions_simulated': len(fraction_data),
                 'summary': summary,
+                'structures': _structures_payload(
+                    present_structures,
+                    list(prescriptions.keys()), list(tolerances.keys()),
+                ),
                 'mode': 'demo',
             })
 
@@ -339,12 +394,19 @@ def simulate_patient(patient_id):
             })
             fraction_idx += 1
 
-        summary = _build_summary(fraction_data, prescriptions, tolerances)
+        # Which canonical structures are actually contoured for this patient.
+        present_structures = _present_structure_names()
+        summary = _build_summary(fraction_data, prescriptions, tolerances,
+                                 present_structures)
         return jsonify({
             'patient_id': patient_id,
             'fractions': fraction_data,
             'total_fractions_simulated': len(fraction_data),
             'summary': summary,
+            'structures': _structures_payload(
+                present_structures,
+                list(prescriptions.keys()), list(tolerances.keys()),
+            ),
             'mode': 'live' if AGENT is not None else 'demo',
         })
     except Exception as e:
