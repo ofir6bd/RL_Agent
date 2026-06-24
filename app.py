@@ -182,33 +182,114 @@ def get_patient_data(patient_id):
         return jsonify({'error': str(e)}), 400
 
 
+def _parse_eval_table(path: Path) -> Optional[Dict[str, Dict[str, object]]]:
+    """Parse the pipe-delimited per-patient table written by evaluate.py.
+
+    Returns ``{patient_id: {column: value}}`` (numeric where possible, ``None``
+    for ``-`` cells), or ``None`` if the file is absent / unparseable. The
+    ``MEAN`` summary row is skipped. ``evaluate.py`` writes these files as
+    UTF-16 on Windows, so we try a few encodings.
+    """
+    if not path.exists():
+        return None
+    text = None
+    for encoding in ('utf-16', 'utf-8-sig', 'utf-8'):
+        try:
+            text = path.read_text(encoding=encoding)
+            break
+        except (UnicodeError, ValueError):
+            continue
+    if text is None:
+        return None
+
+    lines = text.splitlines()
+    header = None
+    header_idx = None
+    for i, line in enumerate(lines):
+        if 'Patient' in line and 'MAE' in line and '|' in line:
+            header = [c.strip() for c in line.split('|')]
+            header_idx = i
+            break
+    if header is None:
+        return None
+
+    rows: Dict[str, Dict[str, object]] = {}
+    for line in lines[header_idx + 1:]:
+        if '|' not in line:
+            continue
+        if set(line.strip()) <= set('-+| '):  # separator row
+            continue
+        cells = [c.strip() for c in line.split('|')]
+        if len(cells) != len(header):
+            continue
+        patient = cells[0]
+        if not patient or patient.upper() == 'MEAN':
+            continue
+        row: Dict[str, object] = {}
+        for col, val in zip(header[1:], cells[1:]):
+            if val in ('', '-'):
+                row[col] = None
+            else:
+                try:
+                    row[col] = float(val)
+                except ValueError:
+                    row[col] = val
+        rows[patient] = row
+    return rows or None
+
+
 @app.route('/api/patients/<patient_id>/evaluation', methods=['GET'])
 def get_patient_evaluation(patient_id):
-    """Get evaluation results for a patient."""
-    try:
-        eval_file = Path(f"runs/eval_best.txt")
-        
-        # Parse evaluation file (simplified - adjust based on your format)
-        results = {
-            'patient_id': patient_id,
-            'ptv_coverage': {},
-            'oar_doses': {},
-            'overall_reward': 0.0
+    """Return *real* evaluation results parsed from runs/eval_best.txt.
+
+    Reports ``503`` if no evaluation file exists yet and ``404`` if the
+    requested patient is not in it, rather than fabricating numbers.
+    """
+    eval_path = Path("runs/eval_best.txt")
+    table = _parse_eval_table(eval_path)
+    if table is None:
+        return jsonify({
+            'error': f'No evaluation results at {eval_path}. '
+                     'Run evaluate.py to generate it.',
+        }), 503
+
+    row = table.get(patient_id)
+    if row is None:
+        return jsonify({
+            'error': f'Patient {patient_id} not found in {eval_path.name}.',
+            'available_patients': sorted(table.keys()),
+        }), 404
+
+    ptv_names = PTV_NAMES if MODELS_AVAILABLE else ["PTV70", "PTV63", "PTV56"]
+    tolerances = (CONFIG.oar_tolerance if CONFIG is not None
+                  and not isinstance(CONFIG, dict) else {
+                      "Brainstem": 54.0, "SpinalCord": 45.0, "Mandible": 70.0,
+                      "LeftParotid": 26.0, "RightParotid": 26.0,
+                  })
+
+    ptv_d95 = {ptv: row[f'D95_{ptv}']
+               for ptv in ptv_names if f'D95_{ptv}' in row}
+    oar_doses = {}
+    for oar, tol in tolerances.items():
+        if oar not in row:
+            continue
+        mean_dose = row[oar]
+        oar_doses[oar] = {
+            'mean': mean_dose,
+            'tolerance': tol,
+            'pct_of_tolerance': (round(mean_dose / tol * 100, 1)
+                                 if mean_dose is not None and tol > 0 else None),
+            'violation': bool(mean_dose is not None and mean_dose > tol),
         }
-        
-        # Initialize with default structure
-        for ptv in PTV_NAMES:
-            results['ptv_coverage'][ptv] = random.uniform(0.8, 1.0)
-        for oar in OAR_NAMES:
-            results['oar_doses'][oar] = {
-                'mean': random.uniform(10, 50),
-                'max': random.uniform(50, 80),
-                'tolerance': CONFIG.oar_tolerance[oar]
-            }
-        
-        return jsonify(results)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+
+    return jsonify({
+        'patient_id': patient_id,
+        'source': str(eval_path),
+        'mae': row.get('MAE'),
+        'dvh_score': row.get('DVH'),
+        'ptv_d95': ptv_d95,
+        'oar_doses': oar_doses,
+    })
 
 
 def _present_structure_names():
@@ -407,7 +488,10 @@ def simulate_patient(patient_id):
                 present_structures,
                 list(prescriptions.keys()), list(tolerances.keys()),
             ),
-            'mode': 'live' if AGENT is not None else 'demo',
+            # Real env + dose model, but a random (untrained) policy when no
+            # checkpoint is loaded -- label it so the UI never implies these
+            # plans came from the trained agent.
+            'mode': 'live' if AGENT is not None else 'random-policy',
         })
     except Exception as e:
         print(f"Error in simulate_patient: {e}")

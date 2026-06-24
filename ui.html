@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RL Agent - Radiation Therapy UI</title>
-    
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🎯</text></svg>">
+
     <!-- React and ReactDOM from CDN -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -859,7 +860,9 @@
                             </div>
                             <div className="ptv-buckets">
                                 {config.ptv_names.map((ptv, idx) => {
-                                    const coverage = 0.7 + Math.random() * 0.3;
+                                    const rx = config.ptv_prescriptions[ptv];
+                                    const dose = (fractionData.cumulative_organ_doses || {})[ptv] || 0;
+                                    const coverage = rx > 0 ? Math.min(dose / rx, 1) : 0;
                                     const coverageClass = coverage > 0.95 ? 'ptv-green' : coverage > 0.80 ? 'ptv-orange' : 'ptv-red';
                                     return (
                                         <div key={ptv} className={`ptv-bucket ${coverageClass}`}>
@@ -887,7 +890,7 @@
                             </div>
                             <div className="oar-items">
                                 {config.oar_names.map((oar, idx) => {
-                                    const meanDose = 10 + Math.random() * 40;
+                                    const meanDose = (fractionData.cumulative_organ_doses || {})[oar] || 0;
                                     const tolerance = config.oar_tolerances[oar];
                                     const violation = meanDose > tolerance;
                                     return (
@@ -1079,13 +1082,17 @@
                 canvas.width = 400;
                 canvas.height = 400;
 
-                // Generate random heatmap data
-                const data = Array.from({length: gridSize}, () =>
-                    Array.from({length: gridSize}, () => Math.random() * 100)
-                );
+                // Real beamlet intensities for the selected beam, delivered
+                // by the agent this fraction. Fall back to zeros if absent.
+                const beam = (fractionData && fractionData.beam_heatmap
+                              && fractionData.beam_heatmap[beamId]) || [];
+                const data = (beam.length
+                    ? beam
+                    : Array.from({length: gridSize}, () =>
+                        Array.from({length: gridSize}, () => 0)));
 
                 const cellSize = canvas.width / gridSize;
-                const maxValue = 100;
+                const maxValue = Math.max(1e-6, ...data.flat());
 
                 // Draw heatmap
                 data.forEach((row, i) => {
@@ -1110,7 +1117,7 @@
                     ctx.lineTo(canvas.width, i * cellSize);
                     ctx.stroke();
                 }
-            }, [beamId, gridSize]);
+            }, [beamId, gridSize, fractionData]);
 
             return <canvas ref={canvasRef} id="heatmap"></canvas>;
         }
